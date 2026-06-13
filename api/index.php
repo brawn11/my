@@ -40,7 +40,7 @@ header('Content-Type: text/html; charset=utf-8');
 <body>
 
     <div class="container">
-        <h1>تهانينا! 🎉</h1>
+        <h1>محمد! 🎉</h1>
         <p>ملف الـ PHP يعمل بنجاح وبكفاءة عالية على منصة <strong>Vercel</strong>.</p>
         
         <div class="info">
