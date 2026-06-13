@@ -1,1039 +1,757 @@
 <?php
-// index.php - صفحة المزايدة الرئيسية (متوافقة مع adminn.php) - نسخة محسّنة بالكامل
-session_start();
+// index.php - منصة مزاد النخبة v18.0
+// نظام فائق السرعة - تحديث 1ms لجميع التحديثات
 
-// =============== التحقق من تسجيل الدخول ===============
-$isLoggedIn = isset($_SESSION['user_phone']);
+session_start();
+header('Content-Type: text/html; charset=utf-8');
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+
+$isLoggedIn = isset($_SESSION['user_phone']) && !empty($_SESSION['user_phone']);
 $userName = $isLoggedIn ? $_SESSION['user_name'] : 'زائر';
 $userPhone = $isLoggedIn ? $_SESSION['user_phone'] : '';
 
-// =============== جلب بيانات المزاد النشط ===============
+if (!isset($_SESSION['client_token'])) {
+    $_SESSION['client_token'] = bin2hex(random_bytes(16));
+}
+$clientToken = $_SESSION['client_token'];
+
 $auctionsFile = 'auctions_db.json';
-$activeAuction = null;
+$initialAuctionData = null;
+
 if (file_exists($auctionsFile)) {
-    $auctions = json_decode(file_get_contents($auctionsFile), true) ?: [];
-    foreach ($auctions as $auc) {
-        if ($auc['status'] === 'active') {
-            $activeAuction = $auc;
-            break;
+    $auctions = json_decode(file_get_contents($auctionsFile), true);
+    if (is_array($auctions)) {
+        foreach ($auctions as $auc) {
+            if (isset($auc['status']) && $auc['status'] === 'active') {
+                $initialAuctionData = $auc;
+                break;
+            }
         }
     }
 }
+
+$safeInitialData = $initialAuctionData ? json_encode($initialAuctionData, JSON_UNESCAPED_UNICODE | JSON_NUMERIC_CHECK) : 'null';
 ?>
 <!DOCTYPE html>
 <html dir="rtl" lang="ar">
 <head>
     <meta charset="utf-8"/>
-    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" name="viewport"/>
-    <title>مزاد النخبة - مباشر</title>
-    <script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
-    <link href="https://fonts.googleapis.com" rel="preconnect"/>
-    <link crossorigin="" href="https://fonts.gstatic.com" rel="preconnect"/>
-    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
-    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&display=swap" rel="stylesheet"/>
+    <meta content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" name="viewport"/>
+    <meta name="theme-color" content="#00685f">
+    <title>مزاد النخبة | المزاد المباشر</title>
     
-    <script id="tailwind-config">
-      tailwind.config = {
-        darkMode: "class",
-        theme: {
-          extend: {
-            colors: {
-                "primary": "#00685f",
-                "primary-dark": "#004d46",
-                "background": "#f7f9fb",
-                "surface": "#ffffff",
-                "trusted-green": "#dcfce7",
-                "trusted-text": "#166534",
-            },
-            fontFamily: { sans: ["IBM Plex Sans Arabic", "sans-serif"] },
-            animation: {
-                'fast-fade': 'fadeIn 0.15s ease-out forwards',
-                'slide-up': 'slideUp 0.25s cubic-bezier(0.16, 1, 0.3, 1) forwards',
-                'pop-in': 'popIn 0.3s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards',
-                'price-bounce': 'priceBounce 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55)',
-                'winner-glow': 'winnerGlow 1s ease-in-out infinite',
-            },
-            keyframes: {
-                fadeIn: { '0%': { opacity: '0' }, '100%': { opacity: '1' } },
-                slideUp: { '0%': { transform: 'translateY(15px)', opacity: '0' }, '100%': { transform: 'translateY(0)', opacity: '1' } },
-                popIn: { '0%': { transform: 'scale(0.8)', opacity: '0' }, '100%': { transform: 'scale(1)', opacity: '1' } },
-                priceBounce: { '0%': { transform: 'scale(1)' }, '30%': { transform: 'scale(1.2)', color: '#00685f' }, '60%': { transform: 'scale(0.95)' }, '100%': { transform: 'scale(1)' } },
-                winnerGlow: { '0%, 100%': { boxShadow: '0 0 20px rgba(0, 104, 95, 0.3)' }, '50%': { boxShadow: '0 0 40px rgba(0, 104, 95, 0.6)' } }
-            }
-          },
-        },
-      }
-    </script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Arabic:wght@300;400;500;600;700&display=swap" rel="stylesheet"/>
+    <link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@24,400,0,0&display=swap" rel="stylesheet"/>
+
+    <script>tailwind.config={theme:{extend:{colors:{primary:"#00685f",whatsapp:"#25D366"}}}};</script>
+
     <style>
-        body { font-family: 'IBM Plex Sans Arabic', sans-serif; background-color: #f7f9fb; -webkit-tap-highlight-color: transparent; overflow-x: hidden; }
-        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; }
-        
-        /* تحسين التنقل بين الصفحات - SPA سريع */
-        .page-container { position: relative; min-height: 100vh; }
-        .page-view { 
-            position: absolute; 
-            top: 0; left: 0; right: 0; 
-            opacity: 0; 
-            visibility: hidden;
-            transition: opacity 0.15s ease, visibility 0.15s ease;
-            pointer-events: none;
-            min-height: 100vh;
-        }
-        .page-view.active { 
-            opacity: 1; 
-            visibility: visible;
-            pointer-events: auto;
-            position: relative;
-        }
+        * { -webkit-tap-highlight-color: transparent; box-sizing: border-box; margin: 0; padding: 0; }
+        body { font-family: 'IBM Plex Sans Arabic', sans-serif; background: #f8fafc; overflow: hidden; height: 100dvh; }
+        .material-symbols-outlined { font-variation-settings: 'FILL' 0, 'wght' 400, 'GRAD' 0, 'opsz' 24; user-select: none; pointer-events: none; }
 
-        .slider-wrapper { display: flex; transition: transform 0.4s ease-in-out; width: 100%; }
-        .slide { min-width: 100%; flex-shrink: 0; position: relative; }
+        .app-root { position: relative; width: 100%; height: 100dvh; overflow: hidden; }
+        .page-panel { position: absolute; top: 0; left: 0; right: 0; bottom: 0; overflow-y: auto; overflow-x: hidden; -webkit-overflow-scrolling: touch; background: #f8fafc; z-index: 1; opacity: 0; visibility: hidden; }
+        .page-panel.show { opacity: 1; visibility: visible; z-index: 2; }
+        .page-wrap { width: 100%; max-width: 640px; margin: 0 auto; padding-bottom: 80px; }
 
-        .bid-chip { transition: all 0.15s; background-color: white; color: #374151; border: 2px solid #e5e7eb; }
-        .bid-chip.selected { background-color: #00685f !important; color: white !important; border-color: #00685f !important; transform: scale(1.05); box-shadow: 0 4px 12px rgba(0, 104, 95, 0.4); font-weight: 800; }
+        .sticky-header { position: sticky; top: 0; z-index: 40; background: rgba(255,255,255,0.92); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px); border-bottom: 1px solid #e5e7eb; padding: 10px 16px; }
+        .icon-circle { width: 38px; height: 38px; border-radius: 50%; display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; cursor: pointer; border: none; background: transparent; color: #6b7280; text-decoration: none; transition: all 0.15s ease; position: relative; }
+        .icon-circle:hover { background: #f3f4f6; }
+        .icon-circle:active { background: #e5e7eb; transform: scale(0.95); }
+        .icon-circle .material-symbols-outlined { font-size: 22px; }
+        .icon-circle.whatsapp { color: #25D366; }
+
+        .slider-box { position: relative; overflow: hidden; background: #111827; }
+        .slider-track { display: flex; width: 100%; height: 100%; will-change: transform; }
+        .slider-slide { min-width: 100%; flex-shrink: 0; }
+        .slider-slide img { width: 100%; height: 100%; object-fit: cover; display: block; }
+        .img-blurred { filter: blur(20px); transform: scale(1.1); }
+        .img-cover { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: center; cursor: pointer; z-index: 10; background: rgba(0,0,0,0.2); transition: background 0.2s ease; }
+        .img-cover:active { background: rgba(0,0,0,0.4); }
+
+        .badge { display: inline-flex; align-items: center; gap: 4px; padding: 4px 10px; border-radius: 20px; font-size: 10px; font-weight: 700; white-space: nowrap; }
+        .badge-live { background: rgba(255,255,255,0.9); backdrop-filter: blur(4px); }
+        .badge-verified { background: #dcfce7; color: #166534; border: 1px solid #bbf7d0; }
+
+        .bid-chip { background: white; color: #374151; border: 2px solid #e5e7eb; cursor: pointer; user-select: none; transition: all 0.1s ease; }
+        .bid-chip:hover { border-color: #00685f; color: #00685f; }
+        .bid-chip:active { transform: scale(0.94); }
+        .bid-chip.selected { background: #00685f !important; color: white !important; border-color: #00685f !important; font-weight: 700; transform: scale(1.03); }
+        .action-btn { display: inline-flex; align-items: center; gap: 5px; padding: 6px 12px; border-radius: 20px; font-size: 0.7rem; font-weight: 600; background: #f3f4f6; color: #374151; border: 1px solid #e5e7eb; cursor: pointer; white-space: nowrap; transition: all 0.15s ease; }
+        .action-btn:hover { background: #e5e7eb; }
+        .action-btn:active { background: #d1d5db; transform: scale(0.97); }
+        .action-btn .material-symbols-outlined { font-size: 15px; }
+
+        .thumb-strip { display: flex; gap: 6px; overflow-x: auto; padding: 8px 12px; scroll-behavior: smooth; }
+        .thumb-strip::-webkit-scrollbar { height: 2px; }
+        .thumb-strip::-webkit-scrollbar-thumb { background: #d1d5db; border-radius: 10px; }
+        .thumb-item { width: 44px; height: 44px; border-radius: 8px; overflow: hidden; flex-shrink: 0; cursor: pointer; border: 2px solid transparent; transition: all 0.2s ease; }
+        .thumb-item.active { border-color: #00685f; box-shadow: 0 0 0 2px rgba(0,104,95,0.2); }
+        .thumb-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+
+        .bidder-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 14px; background: linear-gradient(135deg, #f0fdf4, #ecfdf5); border: 1px solid #bbf7d0; transition: all 0.2s ease; }
+        .bidder-avatar { width: 44px; height: 44px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: 700; font-size: 1.1rem; flex-shrink: 0; background: linear-gradient(135deg, #00685f, #00897b); color: white; }
+
+        .live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: #22c55e; margin-right: 4px; vertical-align: middle; position: relative; top: -8px; box-shadow: 0 0 6px rgba(34,197,94,0.6); transition: all 0.3s ease; }
+        .live-dot.active { animation: livePulse 0.8s ease-in-out infinite; }
+        .live-dot.syncing { animation: livePulse 0.3s ease-in-out infinite; }
+        @keyframes livePulse { 0%,100% { opacity:1; transform:scale(1); box-shadow:0 0 6px rgba(34,197,94,0.6); } 50% { opacity:0.4; transform:scale(1.6); box-shadow:0 0 12px rgba(34,197,94,0.9); } }
+
+        /* سبينر 5 ثواني */
+        .btn-bid-submit { position: relative; overflow: hidden; transition: all 0.4s ease; }
+        .btn-bid-submit.locked { pointer-events: none; background: #004d46 !important; }
+        .btn-bid-submit .btn-content { display: flex; align-items: center; justify-content: center; gap: 8px; transition: opacity 0.3s ease, transform 0.3s ease; }
+        .btn-bid-submit.locked .btn-content { opacity: 0; transform: scale(0.9); }
+        .btn-bid-submit .btn-spinner-wrap { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 10px; opacity: 0; transition: opacity 0.3s ease; }
+        .btn-bid-submit.locked .btn-spinner-wrap { opacity: 1; }
+        .btn-bid-submit .btn-spinner { width: 24px; height: 24px; border: 3px solid rgba(255,255,255,0.2); border-top-color: white; border-radius: 50%; animation: btnSpin 0.7s linear infinite; }
+        .btn-bid-submit .btn-countdown { color: white; font-size: 0.9rem; font-weight: 700; letter-spacing: 1px; min-width: 20px; text-align: center; }
+        @keyframes btnSpin { to { transform: rotate(360deg); } }
+
+        @keyframes priceFlash { 0% { transform: scale(1); } 40% { transform: scale(1.08); color: #f59e0b; } 100% { transform: scale(1); } }
+        .price-flash { animation: priceFlash 0.3s ease-out; }
+        @keyframes bidSlideIn { 0% { opacity: 0; transform: translateX(-4px); } 100% { opacity: 1; transform: translateX(0); } }
+        .bid-slide-in { animation: bidSlideIn 0.08s ease-out; }
+
+        @keyframes modalPopIn { 0% { opacity: 0; transform: translate(-50%, -50%) scale(0.85); } 70% { transform: translate(-50%, -50%) scale(1.03); } 100% { opacity: 1; transform: translate(-50%, -50%) scale(1); } }
+        .auction-ended-toast { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 24px; padding: 28px 24px; text-align: center; z-index: 100; max-width: 340px; width: 90%; border: 1px solid #fee2e2; box-shadow: 0 25px 60px rgba(0,0,0,0.2); animation: modalPopIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .ended-icon-wrap { width: 72px; height: 72px; border-radius: 50%; background: linear-gradient(135deg, #fef2f2, #fee2e2); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; position: relative; }
+        .ended-icon-in { width: 52px; height: 52px; border-radius: 50%; background: linear-gradient(135deg, #fecaca, #fca5a5); display: flex; align-items: center; justify-content: center; }
+        .ended-dot { position: absolute; width: 10px; height: 10px; border-radius: 50%; background: #f87171; }
+        .ended-dot:nth-child(1) { top: 8px; left: 50%; transform: translateX(-50%); animation: dPulse 1.5s ease-in-out infinite; }
+        .ended-dot:nth-child(2) { top: 50%; right: 8px; transform: translateY(-50%); animation: dPulse 1.5s ease-in-out infinite 0.5s; }
+        .ended-dot:nth-child(3) { bottom: 8px; left: 50%; transform: translateX(-50%); animation: dPulse 1.5s ease-in-out infinite 1s; }
+        .ended-dot:nth-child(4) { top: 50%; left: 8px; transform: translateY(-50%); animation: dPulse 1.5s ease-in-out infinite 0.25s; }
+        @keyframes dPulse { 0%,100% { transform: translate(-50%,-50%) scale(1); opacity:0.5; } 50% { transform: translate(-50%,-50%) scale(1.8); opacity:1; } }
+
+        .notif-panel { position: fixed; top: 65px; left: 12px; right: 12px; max-width: 420px; margin: 0 auto; background: white; border-radius: 16px; border: 1px solid #e5e7eb; z-index: 90; max-height: 65vh; overflow-y: auto; box-shadow: 0 10px 40px rgba(0,0,0,0.08); }
+        .bottom-bar { position: fixed; bottom: 0; left: 0; right: 0; background: rgba(255,255,255,0.95); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); border-top: 1px solid #e5e7eb; z-index: 50; padding-bottom: env(safe-area-inset-bottom); }
+        .modal-wrap { position: fixed; inset: 0; background: rgba(0,0,0,0.5); backdrop-filter: blur(2px); z-index: 60; display: flex; align-items: flex-end; justify-content: center; padding: 16px; }
+        @media (min-width: 640px) { .modal-wrap { align-items: center; } }
+        .lightbox-full { position: fixed; inset: 0; z-index: 80; background: black; display: flex; flex-direction: column; }
         
-        .modal-backdrop { background: rgba(0,0,0,0.85); backdrop-filter: blur(4px); }
-        
-        /* تأثير السعر الديناميكي */
-        .price-pop { animation: priceBounce 0.5s cubic-bezier(0.68, -0.55, 0.265, 1.55); }
-        
-        /* تأثير الفائز */
-        .winner-card { animation: winnerGlow 1s ease-in-out infinite; }
-        
-        /* تحسين أداء الانتقال */
-        .page-loader-mini {
-            position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%);
-            z-index: 300; pointer-events: none;
-        }
+        /* أنماط النافذة المنبثقة للإشعارات */
+        .notif-popup { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; border-radius: 20px; padding: 24px; text-align: center; z-index: 110; max-width: 360px; width: 90%; border: 1px solid #e5e7eb; box-shadow: 0 25px 60px rgba(0,0,0,0.15); animation: modalPopIn 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275); }
+        .notif-popup-icon { width: 64px; height: 64px; border-radius: 50%; background: linear-gradient(135deg, #fef3c7, #fde68a); display: flex; align-items: center; justify-content: center; margin: 0 auto 16px; }
+        .checkbox-container { display: flex; align-items: center; justify-content: center; gap: 8px; margin: 16px 0; cursor: pointer; }
+        .checkbox-container input[type="checkbox"] { width: 18px; height: 18px; accent-color: #00685f; }
+        .checkbox-label { font-size: 0.8rem; color: #6b7280; user-select: none; }
     </style>
 </head>
-<body class="text-gray-800 pb-20 flex flex-col">
+<body>
 
-<!-- صفحة التحميل المصغرة (تظهر فقط عند الحاجة للبيانات) -->
-<div id="page-loader" class="fixed inset-0 z-[200] hidden flex items-center justify-center bg-white/90 backdrop-blur-sm transition-opacity duration-150">
-    <div class="flex flex-col items-center gap-3 animate-fast-fade">
-        <div class="w-10 h-10 border-3 border-primary border-t-transparent rounded-full animate-spin"></div>
-        <p class="text-gray-500 font-medium text-sm">جاري التحميل...</p>
-    </div>
+<div class="app-root">
+    <div class="page-panel show" id="page-home"><div class="page-wrap"><div class="sticky-header"><div class="flex justify-between items-center"><div class="flex items-center gap-2.5"><div class="w-9 h-9 bg-gradient-to-br from-primary to-[#004d46] rounded-xl flex items-center justify-center text-white font-bold text-sm flex-shrink-0">ن</div><div><h1 class="text-base font-bold text-gray-900">مزاد النخبة</h1><p class="text-[9px] text-gray-400">المنصة الرائدة للمزادات</p></div></div><div class="flex items-center gap-1.5"><a href="https://wa.me/966500000000" target="_blank" rel="noopener" class="icon-circle whatsapp"><span class="material-symbols-outlined">chat</span></a><button onclick="Mazad.forceRefresh()" class="icon-circle"><span class="material-symbols-outlined">refresh</span></button><button onclick="Mazad.toggleNotif()" class="icon-circle"><span class="material-symbols-outlined">notifications</span></button></div></div></div><div class="p-3 space-y-3" id="home-render"></div></div></div>
+    <div class="page-panel" id="page-bid"><div class="page-wrap"><div class="sticky-header"><div class="flex justify-between items-center"><div class="flex items-center gap-2.5"><button onclick="Mazad.goHome()" class="icon-circle text-gray-700"><span class="material-symbols-outlined">arrow_back</span></button><div class="min-w-0"><h2 class="font-bold text-gray-800 text-sm">صفحة المزايدة</h2><p class="text-[9px] text-gray-400" id="bid-status-h">مباشر الآن</p></div></div><div class="flex items-center gap-1.5"><a href="https://wa.me/966500000000" target="_blank" rel="noopener" class="icon-circle whatsapp"><span class="material-symbols-outlined">chat</span></a><button onclick="Mazad.share()" class="icon-circle text-gray-600"><span class="material-symbols-outlined">share</span></button></div></div></div><div class="p-3 space-y-3" id="bid-render"></div></div></div>
 </div>
 
-<div class="page-container">
-    <!-- ================= الصفحة الرئيسية ================= -->
-    <div id="home-page" class="page-view active flex-col w-full">
-        <header class="bg-white/90 backdrop-blur-md shadow-sm sticky top-0 z-40 px-4 py-3 flex justify-between items-center border-b border-gray-100">
-            <button onclick="location.reload()" class="p-2 rounded-full hover:bg-gray-100 text-gray-600 transition-transform active:rotate-180 duration-300">
-                <span class="material-symbols-outlined">refresh</span>
-            </button>
-            <h1 class="text-xl font-bold text-primary tracking-tight">مزاد النخبة</h1>
-            <div class="flex gap-2">
-                <a href="https://wa.me/966500000000" target="_blank" class="group relative flex items-center justify-center w-9 h-9 rounded-full bg-[#25D366] text-white shadow-md hover:shadow-lg hover:scale-110 transition-all duration-300" title="تواصل معنا">
-                    <svg class="w-5 h-5 fill-current transform group-hover:rotate-12 transition-transform" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
-                </a>
-                <button onclick="openNotifications()" class="p-2 rounded-full hover:bg-gray-100 text-gray-600 relative transition-colors">
-                    <span class="material-symbols-outlined">notifications</span>
-                    <span id="notif-badge" class="absolute top-2 right-2 w-2.5 h-2.5 bg-red-500 rounded-full border-2 border-white hidden animate-pulse"></span>
-                </button>
-            </div>
-        </header>
+<div id="notif-panel" class="notif-panel hidden"><div class="p-3 border-b border-gray-100 flex justify-between items-center sticky top-0 bg-white rounded-t-2xl z-10"><h3 class="font-bold text-gray-800 text-sm flex items-center gap-2"><span class="material-symbols-outlined text-primary text-lg">notifications</span> الإشعارات</h3><button onclick="Mazad.closeNotif()" class="p-1.5 hover:bg-gray-100 rounded-full"><span class="material-symbols-outlined text-gray-400">close</span></button></div><div class="p-3 space-y-2" id="notif-list"><div class="text-center py-8 text-gray-400"><span class="material-symbols-outlined text-4xl mb-2 block">notifications_off</span><p class="text-xs">لا توجد إشعارات</p></div></div></div>
 
-        <main class="flex-grow max-w-xl mx-auto w-full p-4 space-y-6" id="home-main-content">
-            <?php if ($activeAuction): ?>
-                <!-- المحتوى الديناميكي للمزاد النشط سيتم بناؤه بواسطة JavaScript -->
-            <?php else: ?>
-                <div class="flex flex-col items-center justify-center h-[60vh] text-center space-y-4 animate-fast-fade">
-                    <div class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-2 shadow-inner">
-                        <span class="material-symbols-outlined text-5xl text-gray-300">inventory_2</span>
-                    </div>
-                    <h2 class="text-2xl font-bold text-gray-800">لا توجد مزادات حالياً</h2>
-                    <p class="text-gray-500 max-w-xs mx-auto">ترقب العروض القادمة، يتم إضافة مزادات جديدة بشكل دوري.</p>
-                    <button onclick="location.reload()" class="mt-4 px-6 py-2 bg-white border border-gray-200 text-gray-600 rounded-full text-sm font-medium hover:bg-gray-50 transition shadow-sm">تحديث الصفحة</button>
-                </div>
-            <?php endif; ?>
-        </main>
-    </div>
+<!-- النافذة المنبثقة للإشعارات مع خيار لا تظهر مرة أخرى -->
+<div id="modal-notif-popup" class="modal-wrap hidden"><div class="notif-popup" onclick="event.stopPropagation()"><div class="notif-popup-icon"><span class="material-symbols-outlined text-3xl text-amber-600">campaign</span></div><h3 class="text-lg font-bold text-gray-900 mb-2">تنبيه من لوحة التحكم</h3><p class="text-gray-500 text-sm mb-1" id="notif-popup-msg">يوجد تحديث جديد في المزاد</p><p class="text-gray-400 text-xs mb-1" id="notif-popup-time">الآن</p><div class="checkbox-container" onclick="document.getElementById('dont-show-again').click()"><input type="checkbox" id="dont-show-again"><label for="dont-show-again" class="checkbox-label">لا تظهر هذه النافذة مرة أخرى</label></div><button onclick="Mazad.dismissNotifPopup()" class="w-full py-3 bg-primary text-white rounded-xl font-bold text-sm active:scale-[0.98] transition-all mt-2">حسناً</button></div></div>
 
-    <!-- ================= صفحة المزايدة ================= -->
-    <div id="bid-page" class="page-view flex-col w-full min-h-screen bg-gray-50">
-        <header class="bg-primary text-white shadow-md sticky top-0 z-50 px-4 py-3 flex justify-between items-center">
-            <div class="flex items-center gap-3">
-                <button onclick="switchToHome()" class="p-1 hover:bg-white/10 rounded-full transition-colors"><span class="material-symbols-outlined">arrow_back</span></button>
-                <h1 class="font-bold text-lg">تفاصيل المزايدة</h1>
-            </div>
-            <div class="flex gap-2">
-                <a href="https://wa.me/966500000000" target="_blank" class="flex items-center justify-center w-8 h-8 rounded-full bg-white/20 text-white hover:bg-[#25D366] transition-all" title="دعم واتساب">
-                    <svg class="w-4 h-4 fill-current" viewBox="0 0 24 24"><path d="M.057 24l1.687-6.163c-1.041-1.804-1.588-3.849-1.587-5.946.003-6.556 5.338-11.891 11.893-11.891 3.181.001 6.167 1.24 8.413 3.488 2.245 2.248 3.481 5.236 3.48 8.414-.003 6.557-5.338 11.892-11.893 11.892-1.99-.001-3.951-.5-5.688-1.448l-6.305 1.654zm6.597-3.807c1.676.995 3.276 1.591 5.392 1.592 5.448 0 9.886-4.434 9.889-9.885.002-5.462-4.415-9.89-9.881-9.892-5.452 0-9.887 4.434-9.889 9.884-.001 2.225.651 3.891 1.746 5.634l-.999 3.648 3.742-.981zm11.387-5.464c-.074-.124-.272-.198-.57-.347-.297-.149-1.758-.868-2.031-.967-.272-.099-.47-.149-.669.149-.198.297-.768.967-.941 1.165-.173.198-.347.223-.644.074-.297-.149-1.255-.462-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.297-.347.446-.521.151-.172.2-.296.3-.495.099-.198.05-.372-.025-.521-.075-.148-.669-1.611-.916-2.206-.242-.579-.487-.501-.669-.51l-.57-.01c-.198 0-.52.074-.792.372s-1.04 1.016-1.04 2.479 1.065 2.876 1.213 3.074c.149.198 2.095 3.2 5.076 4.487.709.306 1.263.489 1.694.626.712.226 1.36.194 1.872.118.571-.085 1.758-.719 2.006-1.413.248-.695.248-1.29.173-1.414z"/></svg>
-                </a>
-                <button onclick="shareContent()" class="p-1.5 hover:bg-white/10 rounded-full transition-colors"><span class="material-symbols-outlined">share</span></button>
-            </div>
-        </header>
+<div id="modal-login" class="modal-wrap hidden"><div class="bg-white w-full max-w-sm rounded-2xl p-6 relative z-10 text-center border border-gray-100" onclick="event.stopPropagation()"><div class="w-16 h-16 bg-amber-50 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4"><span class="material-symbols-outlined text-3xl">lock_person</span></div><h3 class="text-lg font-bold text-gray-900 mb-2">تسجيل الدخول مطلوب</h3><p class="text-gray-500 mb-5 text-xs">يجب عليك تسجيل الدخول للمشاركة.</p><a href="aax.php" class="block w-full bg-primary text-white py-3 rounded-xl font-bold text-sm">تسجيل الدخول</a><button onclick="Mazad.closeModal('modal-login')" class="mt-3 text-gray-400 text-xs">لاحقاً</button></div></div>
 
-        <main class="flex-grow max-w-2xl mx-auto w-full p-4 space-y-4" id="bid-main-content">
-            <!-- المحتوى الديناميكي للمزايدة سيتم بناؤه بواسطة JavaScript -->
-        </main>
-        
-        <!-- إشعار الفائز (يظهر عند انتهاء المزاد) -->
-        <div id="winner-notification" class="fixed bottom-20 left-0 right-0 z-50 hidden flex justify-center px-4">
-            <div class="bg-white rounded-2xl shadow-2xl border-2 border-primary p-4 max-w-sm w-full winner-card animate-slide-up">
-                <div class="flex items-center gap-3">
-                    <div class="w-12 h-12 bg-primary rounded-full flex items-center justify-center text-white text-2xl">🏆</div>
-                    <div>
-                        <p class="text-xs text-gray-500">الفائز بالمزاد</p>
-                        <p class="font-bold text-gray-900 text-lg" id="winner-name">---</p>
-                        <p class="text-primary font-bold" id="winner-bid">---</p>
-                    </div>
-                </div>
-            </div>
-        </div>
-    </div>
-</div>
+<div id="modal-ended" class="modal-wrap hidden"><div class="auction-ended-toast" onclick="event.stopPropagation()"><div class="ended-icon-wrap"><div class="ended-dot"></div><div class="ended-dot"></div><div class="ended-dot"></div><div class="ended-dot"></div><div class="ended-icon-in"><span class="material-symbols-outlined text-white text-3xl">timer_off</span></div></div><h3 class="text-xl font-bold text-gray-900 mb-2">انتهى المزاد</h3><p class="text-gray-500 text-sm mb-1">نعتذر، هذا المزاد انتهى</p><p class="text-gray-400 text-xs mb-5">استقبلنا في مزاد جديد قريباً 🎉</p><button onclick="Mazad.closeModal('modal-ended');Mazad.goHome();" class="w-full py-3 bg-gradient-to-r from-gray-100 to-gray-200 text-gray-700 rounded-xl font-bold text-sm active:scale-[0.98] transition-all">العودة للرئيسية</button></div></div>
 
-<!-- ================= النوافذ المنبثقة ================= -->
+<div id="modal-confirm" class="modal-wrap hidden"><div class="bg-white w-full max-w-sm rounded-2xl p-6 relative z-10 text-center border border-gray-100" onclick="event.stopPropagation()"><div class="w-14 h-14 bg-green-50 text-green-600 rounded-full flex items-center justify-center mx-auto mb-3"><span class="material-symbols-outlined text-2xl">gavel</span></div><h3 class="text-lg font-bold text-gray-900 mb-1">تأكيد المزايدة</h3><p class="text-gray-500 text-xs mb-1">قيمة المزايدة</p><p class="text-3xl font-bold text-primary font-mono mb-2" id="confirm-val">0</p><p class="text-xs text-gray-400 mb-4">ريال سعودي</p><div class="bg-amber-50 border border-amber-200 p-3 rounded-xl mb-4 text-[10px] text-amber-800"><div class="flex items-start gap-1.5"><span class="material-symbols-outlined text-amber-500 text-sm flex-shrink-0 mt-0.5">info</span><span>بالمزايدة أنت توافق على شروط المنصة.</span></div></div><div class="grid grid-cols-2 gap-2.5"><button onclick="Mazad.closeModal('modal-confirm')" class="py-3 bg-gray-100 text-gray-700 rounded-xl font-bold text-sm">إلغاء</button><button onclick="Mazad.submitBid()" class="py-3 bg-primary text-white rounded-xl font-bold text-sm flex items-center justify-center gap-1.5"><span>تأكيد</span><span class="material-symbols-outlined text-sm">check</span></button></div></div></div>
+<div id="modal-desc" class="modal-wrap hidden"><div class="bg-white w-full max-w-sm rounded-2xl p-5 relative z-10 border border-gray-100" onclick="event.stopPropagation()"><div class="flex justify-between items-center mb-4"><h3 class="text-lg font-bold text-gray-900 flex items-center gap-2"><span class="material-symbols-outlined text-primary">description</span> وصف السلعة</h3><button onclick="Mazad.closeModal('modal-desc')" class="p-1.5 hover:bg-gray-100 rounded-full"><span class="material-symbols-outlined text-gray-400">close</span></button></div><div class="max-h-[50vh] overflow-y-auto"><p class="text-gray-600 text-sm leading-relaxed whitespace-pre-line" id="desc-content"></p></div><button onclick="Mazad.closeModal('modal-desc')" class="mt-5 w-full py-3 bg-gray-100 text-gray-800 rounded-xl font-bold text-sm">حسناً</button></div></div>
 
-<!-- نافذة تسجيل الدخول الإجباري -->
-<div id="login-required-modal" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4">
-    <div class="absolute inset-0 modal-backdrop" onclick="closeModal('login-required-modal')"></div>
-    <div class="bg-white w-full max-w-sm rounded-2xl p-6 relative z-10 shadow-2xl animate-pop-in text-center">
-        <div class="w-16 h-16 bg-amber-100 text-amber-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span class="material-symbols-outlined text-3xl">login</span>
-        </div>
-        <h3 class="text-xl font-bold text-gray-900 mb-2">يجب تسجيل الدخول</h3>
-        <p class="text-gray-600 mb-6">للمشاركة في المزايدة يرجى تسجيل الدخول أولاً.</p>
-        <a href="aa.php" class="block w-full bg-primary text-white py-3 rounded-xl font-bold mb-3">تسجيل الدخول الآن</a>
-        <button onclick="closeModal('login-required-modal')" class="w-full py-3 text-gray-500 font-medium">إغلاق</button>
-    </div>
-</div>
+<div id="lightbox-full" class="lightbox-full hidden"><div class="absolute top-0 left-0 right-0 p-4 flex justify-between items-center z-10 bg-gradient-to-b from-black/70 to-transparent"><button onclick="Mazad.closeLB()" class="text-white p-2.5 bg-white/10 rounded-full"><span class="material-symbols-outlined">close</span></button><span id="lb-counter" class="text-white/90 text-sm bg-black/40 px-3 py-1.5 rounded-full">1/1</span><button onclick="Mazad.share()" class="text-white p-2.5 bg-white/10 rounded-full"><span class="material-symbols-outlined">share</span></button></div><div class="flex-1 flex items-center justify-center p-4"><img id="lb-img" src="" class="max-w-full max-h-[80vh] object-contain" alt="صورة"></div><div class="absolute bottom-24 left-0 right-0 flex justify-center gap-2 z-10" id="lb-dots"></div><div class="absolute bottom-8 left-0 right-0 flex justify-center gap-8 z-10"><button onclick="Mazad.lbNav(1)" class="p-3 bg-white/10 text-white rounded-full"><span class="material-symbols-outlined text-2xl">chevron_right</span></button><button onclick="Mazad.lbNav(-1)" class="p-3 bg-white/10 text-white rounded-full"><span class="material-symbols-outlined text-2xl">chevron_left</span></button></div><div class="absolute bottom-4 left-1/2 -translate-x-1/2 z-10"><button onclick="Mazad.closeLB()" class="px-6 py-2 bg-white/20 text-white rounded-full text-sm">إغلاق</button></div></div>
 
-<!-- ===== نافذة التنبيه الإجبارية ===== -->
-<div id="notif-popup" class="fixed inset-0 z-[100] hidden flex items-center justify-center p-4">
-    <div class="absolute inset-0 modal-backdrop"></div>
-    <div class="bg-white w-full max-w-sm rounded-2xl p-6 relative z-10 shadow-2xl animate-pop-in text-center">
-        <div class="w-16 h-16 bg-blue-100 text-blue-600 rounded-full flex items-center justify-center mx-auto mb-4">
-            <span class="material-symbols-outlined text-3xl">campaign</span>
-        </div>
-        <h3 id="popup-title" class="text-xl font-bold text-gray-900 mb-2">تنبيه جديد</h3>
-        <p id="popup-msg" class="text-gray-600 mb-6">محتوى التنبيه...</p>
-        
-        <div class="flex items-center justify-start gap-2 mb-4">
-            <input type="checkbox" id="dont-show-again" class="w-4 h-4 text-primary rounded border-gray-300 focus:ring-primary">
-            <label for="dont-show-again" class="text-xs text-gray-500 cursor-pointer">لا تظهر هذه النافذة مرة أخرى</label>
-        </div>
+<nav class="bottom-bar"><div class="flex justify-around items-center h-14 max-w-2xl mx-auto"><button onclick="Mazad.goHome()" id="nav-home" class="flex flex-col items-center justify-center w-full h-full text-primary"><span class="material-symbols-outlined text-xl mb-0.5" style="font-variation-settings:'FILL'1;">home</span><span class="text-[9px] font-bold">الرئيسية</span></button><button onclick="Mazad.enterBid()" id="nav-bid" class="flex flex-col items-center justify-center w-full h-full text-gray-400 relative"><span class="material-symbols-outlined text-xl mb-0.5">gavel</span><span id="live-dot" class="absolute top-1 right-1/3 w-2 h-2 bg-red-500 rounded-full border-2 border-white hidden"></span><span class="text-[9px] font-medium">المزاد</span></button><?php if($isLoggedIn): ?><button onclick="Mazad.toggleAccount()" class="flex flex-col items-center justify-center w-full h-full text-gray-400"><div class="w-7 h-7 rounded-full bg-gradient-to-br from-primary to-[#004d46] text-white flex items-center justify-center text-[10px] font-bold mb-0.5"><?= mb_substr($userName,0,1,'UTF-8') ?></div><span class="text-[9px] font-medium">حسابي</span></button><?php else: ?><a href="aax.php" class="flex flex-col items-center justify-center w-full h-full text-gray-400 no-underline"><span class="material-symbols-outlined text-xl mb-0.5">person</span><span class="text-[9px] font-medium">دخول</span></a><?php endif; ?></div><?php if($isLoggedIn): ?><div id="account-menu" class="hidden absolute bottom-16 left-3 right-3 sm:left-auto sm:right-3 sm:w-64 bg-white rounded-xl border border-gray-200 p-1.5 z-50 shadow-lg"><div class="px-3 py-2.5 border-b border-gray-100 mb-1"><p class="font-bold text-gray-900 text-sm"><?= htmlspecialchars($userName) ?></p><p class="text-[10px] text-gray-400 dir-ltr text-right"><?= htmlspecialchars($userPhone) ?></p></div><a href="https://wa.me/966500000000" target="_blank" rel="noopener" class="flex items-center gap-2.5 px-3 py-2.5 text-green-600 hover:bg-green-50 rounded-lg text-xs font-medium no-underline"><span class="material-symbols-outlined text-base">support_agent</span> تواصل مع الدعم</a><a href="aax.php?action=logout" class="flex items-center gap-2.5 px-3 py-2.5 text-red-600 hover:bg-red-50 rounded-lg text-xs font-medium no-underline"><span class="material-symbols-outlined text-base">logout</span> تسجيل الخروج</a></div><?php endif; ?></nav>
 
-        <button onclick="markNotifAsRead()" class="w-full bg-gray-900 text-white py-3 rounded-xl font-bold hover:bg-gray-800 transition">
-            حسناً، فهمت
-        </button>
-    </div>
-</div>
-
-<!-- نافذة عرض الصور -->
-<div id="lightbox-modal" class="fixed inset-0 z-[90] hidden bg-black/95 flex items-center justify-center p-2">
-    <button onclick="closeLightbox()" class="absolute top-4 right-4 text-white p-2 hover:bg-white/10 rounded-full z-50"><span class="material-symbols-outlined text-3xl">close</span></button>
-    <button onclick="prevSlide('lightbox')" class="absolute right-4 top-1/2 -translate-y-1/2 text-white p-2 hover:bg-white/10 rounded-full z-50"><span class="material-symbols-outlined text-4xl">chevron_right</span></button>
-    <button onclick="nextSlide('lightbox')" class="absolute left-4 top-1/2 -translate-y-1/2 text-white p-2 hover:bg-white/10 rounded-full z-50"><span class="material-symbols-outlined text-4xl">chevron_left</span></button>
-    <img id="lightbox-img" src="" class="max-w-full max-h-[90vh] rounded-lg shadow-2xl object-contain">
-</div>
-
-<!-- نافذة الملف الشخصي -->
-<div id="account-modal" class="fixed inset-0 z-[80] hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="absolute inset-0 modal-backdrop" onclick="closeAccountModal()"></div>
-    <div class="bg-white rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm relative z-10 animate-slide-up shadow-2xl">
-        <div class="flex justify-between items-center mb-6">
-            <h3 class="text-xl font-bold text-gray-900">ملفي الشخصي</h3>
-            <button onclick="closeAccountModal()" class="p-1 hover:bg-gray-100 rounded-full"><span class="material-symbols-outlined">close</span></button>
-        </div>
-        <div class="space-y-4 mb-6">
-            <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                <span class="material-symbols-outlined text-primary">person</span>
-                <div><p class="text-xs text-gray-500">الاسم الكريم</p><p class="font-bold text-gray-800"><?= htmlspecialchars($userName) ?></p></div>
-            </div>
-            <div class="flex items-center gap-3 p-3 bg-gray-50 rounded-xl border border-gray-100">
-                <span class="material-symbols-outlined text-primary">phone</span>
-                <div><p class="text-xs text-gray-500">رقم الجوال</p><p class="font-bold text-gray-800 dir-ltr text-right"><?= htmlspecialchars($userPhone) ?></p></div>
-            </div>
-        </div>
-        <div class="space-y-3">
-            <a href="https://wa.me/966500000000" target="_blank" class="w-full py-3 bg-green-50 text-green-700 rounded-xl font-bold hover:bg-green-100 transition-colors flex items-center justify-center gap-2 border border-green-200">
-                <span class="material-symbols-outlined">support_agent</span> تواصل مع الدعم
-            </a>
-            <a href="aa.php?action=logout" class="w-full py-3 bg-red-50 text-red-600 rounded-xl font-bold hover:bg-red-100 transition-colors flex items-center justify-center gap-2 border border-red-100">
-                <span class="material-symbols-outlined">logout</span> تسجيل الخروج
-            </a>
-        </div>
-    </div>
-</div>
-
-<!-- نافذة قائمة التنبيهات -->
-<div id="notif-modal" class="fixed inset-0 z-[60] hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="absolute inset-0 modal-backdrop" onclick="closeModal('notif-modal')"></div>
-    <div class="bg-white rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm relative z-10 animate-slide-up shadow-2xl max-h-[70vh] overflow-y-auto">
-        <div class="flex justify-between items-center mb-4">
-            <h3 class="text-lg font-bold text-gray-900 flex items-center gap-2"><span class="material-symbols-outlined text-primary">campaign</span> أحدث التنبيهات</h3>
-            <button onclick="closeModal('notif-modal')" class="p-1 hover:bg-gray-100 rounded-full"><span class="material-symbols-outlined">close</span></button>
-        </div>
-        <div class="space-y-3" id="notif-list">
-            <div class="text-center text-gray-500 py-4 text-sm">جاري تحميل التنبيهات...</div>
-        </div>
-    </div>
-</div>
-
-<!-- نافذة وصف السلعة -->
-<div id="desc-modal" class="fixed inset-0 z-[60] hidden flex items-end sm:items-center justify-center p-0 sm:p-4">
-    <div class="absolute inset-0 modal-backdrop" onclick="closeModal('desc-modal')"></div>
-    <div class="bg-white rounded-t-3xl sm:rounded-3xl p-6 w-full max-w-sm relative z-10 animate-slide-up shadow-2xl">
-        <h3 class="text-xl font-bold mb-4 text-gray-900">وصف السلعة</h3>
-        <p class="text-gray-600 leading-relaxed text-sm whitespace-pre-line" id="desc-text"></p>
-        <button onclick="closeModal('desc-modal')" class="mt-6 w-full py-3 bg-gray-100 text-gray-800 rounded-xl font-bold">إغلاق</button>
-    </div>
-</div>
-
-<!-- نافذة تعهد المزايدة -->
-<div id="pledge-modal" class="fixed inset-0 z-[70] hidden flex items-center justify-center p-4">
-    <div class="absolute inset-0 modal-backdrop" onclick="closeModal('pledge-modal')"></div>
-    <div class="bg-white rounded-3xl p-6 w-full max-w-sm relative z-10 animate-slide-up text-center shadow-2xl">
-        <div class="w-16 h-16 bg-green-100 text-green-600 rounded-full flex items-center justify-center mx-auto mb-4"><span class="material-symbols-outlined text-3xl">verified_user</span></div>
-        <h3 class="text-xl font-bold mb-2 text-gray-900">تعهد بالمزايدة</h3>
-        <p class="text-gray-500 text-sm mb-6">أقر بأنني ملتزم بدفع قيمة المزايدة في حال الفوز.</p>
-        <button onclick="finalizeBid()" class="w-full bg-primary text-white py-3 rounded-xl font-bold shadow-lg mb-3 flex items-center justify-center gap-2"><span class="material-symbols-outlined">check</span> أوافق وأرسل</button>
-        <button onclick="closeModal('pledge-modal')" class="w-full py-3 text-gray-500 font-medium text-sm">إلغاء</button>
-    </div>
-</div>
-
-<!-- شريط التنقل السفلي -->
-<nav class="fixed bottom-0 left-0 w-full bg-white border-t border-gray-200 z-50 pb-safe shadow-[0_-5px_20px_rgba(0,0,0,0.03)]">
-    <div class="flex justify-around items-center h-16 max-w-xl mx-auto">
-        <button onclick="switchToHome()" id="nav-home" class="nav-btn flex flex-col items-center justify-center w-full h-full text-primary gap-1">
-            <span class="material-symbols-outlined text-2xl" style="font-variation-settings: 'FILL' 1;">home</span>
-            <span class="text-[10px] font-medium">الرئيسية</span>
-        </button>
-        <button onclick="openBidPage()" id="nav-auction" class="nav-btn flex flex-col items-center justify-center w-full h-full text-gray-400 gap-1 transition-colors relative">
-            <span class="material-symbols-outlined text-2xl">gavel</span>
-            <span class="text-[10px] font-medium">المزاد</span>
-            <span id="nav-auction-dot" class="absolute top-1 w-2 h-2 bg-primary rounded-full <?= $activeAuction ? '' : 'hidden' ?>"></span>
-        </button>
-        
-        <?php if($isLoggedIn): ?>
-            <button onclick="document.getElementById('account-modal').classList.remove('hidden')" class="nav-btn flex flex-col items-center justify-center w-full h-full text-gray-400 gap-1">
-                <div class="w-6 h-6 rounded-full bg-primary text-white flex items-center justify-center text-[10px] font-bold"><?= mb_substr($userName, 0, 1, 'UTF-8') ?></div>
-                <span class="text-[10px] font-medium">حسابي</span>
-            </button>
-        <?php else: ?>
-            <a href="aa.php" class="nav-btn flex flex-col items-center justify-center w-full h-full text-gray-400 hover:text-primary gap-1 transition-colors">
-                <span class="material-symbols-outlined text-2xl">person</span>
-                <span class="text-[10px] font-medium">دخول</span>
-            </a>
-        <?php endif; ?>
-    </div>
-</nav>
-
-<!-- =============== كود JavaScript المحسن =============== -->
 <script>
-    // =============== متغيرات عامة ===============
-    const initialData = <?= json_encode($activeAuction) ?>;
-    let auctionData = initialData ? { ...initialData, images: Array.isArray(initialData.images) ? initialData.images : [], bids: Array.isArray(initialData.bids) ? initialData.bids : [] } : null;
+(function(){
+    'use strict';
 
-    let selectedIncrement = 100;
-    let currentSlide = 0;
-    let slideInterval;
-    let viewersCount = Math.floor(Math.random() * (25 - 10 + 1)) + 10;
-    let lastNotifTime = 0;
-    let currentNotifId = null;
-    let pricePopTimeout = null;
-    let auctionEnded = false; // متغير لمنع التكرار عند انتهاء المزاد
-    let dataCache = {}; // تخزين مؤقت للبيانات
-    let lastFetchTime = 0;
-    const FETCH_DEBOUNCE = 1500; // مدة منع تكرار الجلب (1.5 ثانية)
+    const CLIENT_TOKEN = "<?= $clientToken ?>";
+    const LOCK_DURATION = 5000;
+    const SYNC_INTERVAL = 1; // 1ms للتحديث الفائق السرعة
 
-    const currentUserDisplayName = "<?= $isLoggedIn ? addslashes($userName) : '' ?>";
-    const currentUserPhone = "<?= $isLoggedIn ? addslashes($userPhone) : '' ?>";
-    const isLoggedIn = <?= $isLoggedIn ? 'true' : 'false' ?>;
+    // التحقق من تفضيل المستخدم لإظهار النافذة المنبثقة
+    const dontShowPopup = localStorage.getItem('dont_show_notif_popup') === 'true';
 
-    // =============== التهيئة ===============
-    window.onload = function() {
-        if (auctionData) {
-            buildHomeContent();
-            buildBidContent();
-            startSlider();
-            updateTimers();
-            updatePriceUI(false);
-            renderBidsLog();
-            checkAuctionStatus();
-            updateExpectedPrice();
-            updateNavHighlight('home');
-        } else {
-            buildEmptyHome();
-        }
-        simulateViewers();
-        setInterval(updateTimers, 1000);
-        setInterval(fetchFreshData, 2000); // تحديث كل ثانيتين
-        setInterval(checkNotifications, 3000);
-        document.addEventListener("visibilitychange", () => {
-            if (!document.hidden) fetchFreshData(true); // جلب فوري عند العودة
-        });
+    const S = {
+        auction: <?= $safeInitialData ?>,
+        user: { loggedIn: <?= $isLoggedIn?'true':'false' ?>, name:"<?= addslashes($userName) ?>", phone:"<?= addslashes($userPhone) ?>" },
+        ui: { slide:0, lbIdx:0, inc:100, fetching:false, lastBids:0, lastPrice:0, lastAucId:null, lastStatus:null, currentPage:'home', bidLocked:false, bidTimer:null, bidSeconds:0, priceVersion:0, domReady:false },
+        timers: { clock:null, viewers:null, dataSync:null, pageSync:null },
+        viewers: Math.floor(Math.random()*12)+3,
+        priceCache: 0, bidCache: 0,
+        lastNotifCheck: 0,
+        frameCount: 0
     };
 
-    // =============== بناء واجهة الصفحة الرئيسية ===============
-    function buildHomeContent() {
-        const container = document.getElementById('home-main-content');
-        if (!auctionData) return;
-        container.innerHTML = `
-            <div class="text-center space-y-2 py-2 animate-fast-fade">
-                <span class="inline-block py-1 px-3 rounded-full bg-primary/10 text-primary text-xs font-bold tracking-wide uppercase">مزاد مباشر الآن</span>
-                <h2 class="text-3xl font-bold text-gray-900 leading-snug">${auctionData.title}</h2>
-            </div>
-            <div class="bg-white rounded-[2rem] shadow-xl shadow-gray-200/50 overflow-hidden border border-gray-100 relative group">
-                <div class="relative aspect-[4/3] bg-gray-100 overflow-hidden">
-                    <div id="home-slider-wrapper" class="slider-wrapper h-full"></div>
-                    <div class="absolute inset-0 flex items-center justify-center bg-gradient-to-t from-black/40 to-transparent z-10 cursor-pointer" onclick="openLightbox(currentSlide)">
-                        <button class="bg-white/95 backdrop-blur text-gray-900 px-5 py-2.5 rounded-full font-bold text-sm shadow-xl hover:scale-105 transition-all flex items-center gap-2 border border-gray-100">
-                            <span class="material-symbols-outlined text-lg">photo_library</span> عرض الصور
-                        </button>
-                    </div>
-                    <button onclick="prevSlide('home')" class="absolute right-4 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg transition-all z-20 opacity-0 group-hover:opacity-100">
-                        <span class="material-symbols-outlined text-lg">chevron_right</span>
-                    </button>
-                    <button onclick="nextSlide('home')" class="absolute left-4 top-1/2 -translate-y-1/2 bg-white/80 hover:bg-white text-gray-800 p-2 rounded-full shadow-lg transition-all z-20 opacity-0 group-hover:opacity-100">
-                        <span class="material-symbols-outlined text-lg">chevron_left</span>
-                    </button>
-                    <div class="absolute bottom-4 left-0 right-0 flex justify-center gap-1.5 pointer-events-none" id="home-dots"></div>
-                    <div class="absolute top-4 right-4 bg-trusted-green text-trusted-text px-3 py-1.5 rounded-full text-xs font-bold flex items-center gap-1.5 shadow-sm border border-green-200 z-20">
-                        <span class="material-symbols-outlined text-sm fill-current">verified_user</span> موثوق
-                    </div>
-                    <div class="absolute top-4 left-4 bg-black/70 backdrop-blur text-white px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-2 shadow-lg border border-white/10 z-20">
-                        <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                        <span id="viewers-count-home">${viewersCount}</span> يشاهد الآن
-                    </div>
-                </div>
-                <div class="p-6 space-y-6">
-                    <button onclick="openDescription()" class="w-full py-3 bg-gray-50 hover:bg-gray-100 text-gray-700 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 border border-gray-200">
-                        <span class="material-symbols-outlined text-lg text-gray-400">description</span> عرض تفاصيل ووصف السلعة
-                    </button>
-                    <div class="bg-primary/5 rounded-2xl p-5 text-center border border-primary/10 relative overflow-hidden">
-                        <div class="absolute top-0 left-0 w-1 h-full bg-primary"></div>
-                        <p class="text-xs text-primary font-bold mb-2 uppercase tracking-wider">ينتهي المزاد خلال</p>
-                        <div class="flex justify-center items-center gap-3 font-mono text-2xl font-bold text-gray-800" id="home-timer"></div>
-                    </div>
-                    <div class="grid grid-cols-2 gap-6">
-                        <div class="border-l border-gray-100 pl-4">
-                            <span class="text-xs text-gray-400 block mb-1 font-medium">أعلى مزايدة</span>
-                            <span class="text-2xl font-bold text-primary"><span id="home-price">${Number(auctionData.current_price).toLocaleString()}</span> <span class="text-sm font-normal text-gray-500">ر.س</span></span>
-                        </div>
-                        <div class="pr-2">
-                            <span class="text-xs text-gray-400 block mb-1 font-medium">المزايد الحالي</span>
-                            <div class="flex items-center gap-3 mt-1">
-                                <div class="w-8 h-8 rounded-full bg-primary/10 text-primary flex items-center justify-center text-sm font-bold" id="home-bidder-avatar">?</div>
-                                <span class="text-base font-bold text-gray-800 truncate" id="home-bidder">لا يوجد</span>
-                            </div>
-                        </div>
-                    </div>
-                    <button id="main-action-btn" onclick="openBidPage()" class="w-full bg-primary hover:bg-primary-dark text-white py-4 rounded-xl font-bold text-lg shadow-lg shadow-primary/30 active:scale-[0.98] transition-all flex items-center justify-center gap-2 group">
-                        <span class="material-symbols-outlined group-hover:rotate-12 transition-transform">gavel</span> ابدأ المزايدة الآن
-                    </button>
-                </div>
-            </div>
-        `;
-        renderSlider('home-slider-wrapper', 'home-dots');
+    const el = (s,p) => (p||document).querySelector(s);
+    const fc = n => Number(n||0).toLocaleString('en-US');
+    const sz = s => { const d=document.createElement('div'); d.textContent=s||''; return d.innerHTML; };
+
+    // ===== نظام التحديث الخفي المتقدم =====
+    // مخبأ بيانات محلياً للمقارنة السريعة
+    let _domCache = { hPrice:'', bPrice:'', hBidder:'', bBidder:'', hAmount:'', bAmount:'', hTimer:'', bTimer:'', bidsHTML:'', viewers:'', bidStatus:'' };
+    
+    function updateDOMElement(id, value, cacheKey) {
+        if (_domCache[cacheKey] === value) return false;
+        _domCache[cacheKey] = value;
+        const elem = el('#'+id);
+        if (elem && elem.textContent !== value) { 
+            elem.textContent = value; 
+            return true; 
+        }
+        return false;
+    }
+    
+    function updateDOMHTML(id, value, cacheKey) {
+        if (_domCache[cacheKey] === value) return false;
+        _domCache[cacheKey] = value;
+        const elem = el('#'+id);
+        if (elem && elem.innerHTML !== value) { 
+            elem.innerHTML = value; 
+            return true; 
+        }
+        return false;
+    }
+    
+    function resetDOMCache() {
+        _domCache = { hPrice:'', bPrice:'', hBidder:'', bBidder:'', hAmount:'', bAmount:'', hTimer:'', bTimer:'', bidsHTML:'', viewers:'', bidStatus:'' };
     }
 
-    function buildEmptyHome() {
-        document.getElementById('home-main-content').innerHTML = `
-            <div class="flex flex-col items-center justify-center h-[60vh] text-center space-y-4 animate-fast-fade">
-                <div class="w-24 h-24 bg-gray-100 rounded-full flex items-center justify-center mb-2 shadow-inner">
-                    <span class="material-symbols-outlined text-5xl text-gray-300">inventory_2</span>
-                </div>
-                <h2 class="text-2xl font-bold text-gray-800">لا توجد مزادات حالياً</h2>
-                <p class="text-gray-500 max-w-xs mx-auto">ترقب العروض القادمة، يتم إضافة مزادات جديدة بشكل دوري.</p>
-                <button onclick="location.reload()" class="mt-4 px-6 py-2 bg-white border border-gray-200 text-gray-600 rounded-full text-sm font-medium hover:bg-gray-50 transition shadow-sm">تحديث الصفحة</button>
-            </div>`;
+    // ===== النقطة الخضراء =====
+    function pulseLiveDot() {
+        const dots = document.querySelectorAll('.live-dot');
+        dots.forEach(d => { 
+            d.classList.remove('active','syncing'); 
+            d.classList.add('syncing'); 
+        });
+        requestAnimationFrame(() => {
+            dots.forEach(d => { 
+                d.classList.remove('syncing'); 
+                d.classList.add('active'); 
+            });
+        });
     }
 
-    // =============== بناء واجهة صفحة المزايدة ===============
-    function buildBidContent() {
-        if (!auctionData) return;
-        const container = document.getElementById('bid-main-content');
-        container.innerHTML = `
-            <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 text-center">
-                <h2 id="bid-item-title" class="text-xl font-bold text-gray-900">${auctionData.title}</h2>
-            </div>
-            <div class="bg-white rounded-2xl overflow-hidden shadow-sm border border-gray-100 group">
-                <div class="relative aspect-video bg-gray-100">
-                     <div id="bid-slider-wrapper" class="slider-wrapper h-full"></div>
-                     <div class="absolute inset-0 flex items-center justify-center bg-black/10 group-hover:bg-black/20 transition-colors z-10 cursor-pointer" onclick="openLightbox(currentSlide)">
-                        <button class="bg-white/90 backdrop-blur text-gray-800 px-4 py-2 rounded-full font-bold text-sm shadow-lg hover:scale-105 transition-transform flex items-center gap-2">
-                            <span class="material-symbols-outlined text-lg">photo_library</span> عرض الصور
-                        </button>
-                     </div>
-                     <button onclick="prevSlide('bid')" class="absolute right-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1.5 rounded-full backdrop-blur-sm transition-all z-20 opacity-0 group-hover:opacity-100">
-                        <span class="material-symbols-outlined text-lg">chevron_right</span></button>
-                     <button onclick="nextSlide('bid')" class="absolute left-3 top-1/2 -translate-y-1/2 bg-black/40 hover:bg-black/60 text-white p-1.5 rounded-full backdrop-blur-sm transition-all z-20 opacity-0 group-hover:opacity-100">
-                        <span class="material-symbols-outlined text-lg">chevron_left</span></button>
-                     <div class="absolute bottom-3 left-0 right-0 flex justify-center gap-1.5 pointer-events-none" id="bid-dots"></div>
-                     <div class="absolute top-3 right-3 bg-trusted-green text-trusted-text px-3 py-1 rounded-full text-xs font-bold flex items-center gap-1 shadow-sm border border-green-200 z-20">
-                        <span class="material-symbols-outlined text-sm fill-current">verified_user</span> موثوق</div>
-                     <div class="absolute top-3 left-3 bg-black/60 backdrop-blur text-white px-3 py-1 rounded-full text-xs font-medium flex items-center gap-1.5 shadow-lg border border-white/10 z-20">
-                        <span class="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                        <span id="viewers-count-bid">${viewersCount}</span> يشاهد الآن</div>
-                </div>
-            </div>
-            <div class="grid grid-cols-2 gap-3">
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center items-center text-center">
-                    <span class="text-xs text-gray-500 mb-1">السعر الحالي</span>
-                    <div class="text-2xl font-bold text-primary flex items-baseline gap-1">
-                        <span id="bid-current-price">${Number(auctionData.current_price).toLocaleString()}</span>
-                        <span class="text-xs font-normal text-gray-400">ر.س</span>
-                    </div>
-                </div>
-                <div class="bg-white p-4 rounded-2xl shadow-sm border border-gray-100 flex flex-col justify-center items-center text-center">
-                    <span class="text-xs text-gray-500 mb-1">الوقت المتبقي</span>
-                    <div id="bid-timer" class="text-xl font-mono font-bold text-gray-800">00:00:00</div>
-                </div>
-            </div>
-            <button onclick="openDescription()" class="w-full py-3 bg-white hover:bg-gray-50 text-gray-700 rounded-xl font-semibold text-sm transition-colors flex items-center justify-center gap-2 border border-gray-200 shadow-sm">
-                <span class="material-symbols-outlined text-lg text-gray-400">description</span> عرض تفاصيل ووصف السلعة
-            </button>
-            <div id="bidding-controls" class="bg-white p-5 rounded-2xl shadow-sm border border-gray-100">
-                <h3 class="text-sm font-bold text-gray-800 mb-4 flex items-center gap-2">
-                    <span class="material-symbols-outlined text-primary text-lg">add_circle</span> اختر قيمة الزيادة
-                </h3>
-                <div class="grid grid-cols-5 gap-2 mb-4" id="bid-chips">
-                    <button class="bid-chip h-14 rounded-xl font-bold text-base flex items-center justify-center" onclick="selectAmount(this, 10)">10</button>
-                    <button class="bid-chip h-14 rounded-xl font-bold text-base flex items-center justify-center" onclick="selectAmount(this, 50)">50</button>
-                    <button class="bid-chip selected h-14 rounded-xl font-bold text-base flex items-center justify-center" onclick="selectAmount(this, 100)">100</button>
-                    <button class="bid-chip h-14 rounded-xl font-bold text-base flex items-center justify-center" onclick="selectAmount(this, 150)">150</button>
-                    <button class="bid-chip h-14 rounded-xl font-bold text-base flex items-center justify-center" onclick="selectAmount(this, 200)">200</button>
-                </div>
-                <div class="text-center mb-4 p-2 bg-primary/5 rounded-lg border border-primary/10">
-                    <span class="text-xs text-gray-500">المزايدة الجديدة ستكون: </span>
-                    <span class="font-mono font-bold text-primary text-lg" id="expected-new-price">0</span>
-                    <span class="text-xs text-gray-500"> ر.س</span>
-                </div>
-                <button id="confirm-bid-btn" onclick="confirmBidAction()" class="w-full bg-primary text-white py-3.5 rounded-xl font-bold shadow-lg shadow-primary/20 active:scale-95 transition-transform flex items-center justify-center gap-2">
-                    <span class="material-symbols-outlined">check_circle</span> تأكيد وإرسال المزايدة
-                </button>
-            </div>
-            <div id="stopped-message" class="hidden bg-gray-100 p-6 rounded-2xl text-center border border-gray-200">
-                <span class="material-symbols-outlined text-4xl text-gray-400 mb-2">block</span>
-                <h3 class="font-bold text-gray-700 text-lg">المزاد مغلق</h3>
-                <p class="text-gray-500 text-sm">تم إيقاف هذا المزاد أو بيعه.</p>
-            </div>
-            <div class="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
-                <div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center">
-                    <h3 class="text-sm font-bold text-gray-700 flex items-center gap-2">
-                        <span class="material-symbols-outlined text-gray-400 text-lg">history</span> سجل المزايدات الحي
-                    </h3>
-                    <span class="text-[10px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full flex items-center gap-1">
-                        <span class="w-1.5 h-1.5 bg-green-500 rounded-full animate-pulse"></span> مباشر
-                    </span>
-                </div>
-                <div id="bids-log" class="divide-y divide-gray-50"></div>
-            </div>
-        `;
-        renderSlider('bid-slider-wrapper', 'bid-dots');
+    // ===== قفل 5 ثواني إلزامي =====
+    function lockBidButton() { 
+        if(S.ui.bidLocked) return; 
+        S.ui.bidLocked=true; 
+        S.ui.bidSeconds=Math.ceil(LOCK_DURATION/1000);
+        const btn=el('.btn-bid-submit'); 
+        if(!btn) return; 
+        btn.classList.add('locked'); 
+        const cd=btn.querySelector('.btn-countdown'); 
+        if(cd) cd.textContent=S.ui.bidSeconds+'s';
+        S.ui.bidTimer=setInterval(()=>{
+            S.ui.bidSeconds--; 
+            if(cd) cd.textContent=S.ui.bidSeconds>0?S.ui.bidSeconds+'s':''; 
+            if(S.ui.bidSeconds<=0) unlockBidButton();
+        },1000); 
+        setTimeout(()=>{if(S.ui.bidLocked) unlockBidButton();},LOCK_DURATION+300); 
+    }
+    
+    function unlockBidButton() { 
+        S.ui.bidLocked=false; 
+        if(S.ui.bidTimer){clearInterval(S.ui.bidTimer);S.ui.bidTimer=null;} 
+        const btn=el('.btn-bid-submit'); 
+        if(btn){btn.classList.remove('locked');const cd=btn.querySelector('.btn-countdown');if(cd)cd.textContent='';} 
     }
 
-    // =============== جلب البيانات المحدثة بسرعة (محسّن مع debounce) ===============
-    async function fetchFreshData(immediate = false) {
-        const now = Date.now();
-        // منع تكرار الجلب السريع (debounce)
-        if (!immediate && (now - lastFetchTime) < FETCH_DEBOUNCE) return;
-        lastFetchTime = now;
+    // ===== تأثيرات =====
+    function flashPrice(el) { 
+        if(!el) return; 
+        el.classList.remove('price-flash'); 
+        void el.offsetWidth; 
+        el.classList.add('price-flash'); 
+    }
+    
+    function animateBids() { 
+        const items = document.querySelectorAll('#bids-list > div');
+        items.forEach((item,i)=>{ 
+            item.classList.remove('bid-slide-in'); 
+            void item.offsetWidth; 
+            item.style.animationDelay=(i*0.01)+'s'; 
+            item.classList.add('bid-slide-in'); 
+        }); 
+    }
+
+    function showPage(page) {
+        if(S.ui.currentPage===page) return; 
+        S.ui.currentPage=page;
+        const hp=el('#page-home'),bp=el('#page-bid'),nh=el('#nav-home'),nb=el('#nav-bid');
+        [hp,bp].forEach(p=>{if(p)p.classList.remove('show');});
+        [nh,nb].forEach(n=>{if(n){n.classList.remove('text-primary');n.classList.add('text-gray-400');const i=n.querySelector('.material-symbols-outlined');if(i)i.style.fontVariationSettings="'FILL'0";}});
+        if(page==='home'){
+            if(hp){hp.classList.add('show');hp.scrollTop=0;}
+            if(nh){nh.classList.add('text-primary');nh.classList.remove('text-gray-400');const i=nh.querySelector('.material-symbols-outlined');if(i)i.style.fontVariationSettings="'FILL'1";}
+        } else {
+            if(bp){bp.classList.add('show');bp.scrollTop=0;}
+            if(nb){nb.classList.add('text-primary');nb.classList.remove('text-gray-400');const i=nb.querySelector('.material-symbols-outlined');if(i)i.style.fontVariationSettings="'FILL'1";}
+        }
+        el('#account-menu')?.classList.add('hidden');
+        resetDOMCache();
+    }
+
+    function goHome() { showPage('home'); }
+    function enterBid() { 
+        if(!S.auction){showPage('home');return;} 
+        if(S.auction.status!=='active'){openModal('modal-ended');return;} 
+        if(!S.user.loggedIn){openModal('modal-login');return;} 
+        unlockBidButton(); 
+        S.priceCache=S.auction.current_price||0; 
+        S.bidCache=S.auction.bids?S.auction.bids.length:0; 
+        S.ui.priceVersion=S.auction.price_version||0; 
+        renderBidPage(); 
+        showPage('bid'); 
+    }
+    function toggleAccount() { el('#account-menu')?.classList.toggle('hidden'); }
+    function forceRefresh() { window.location.reload(); }
+
+    // ===== عرض الصفحات =====
+    function renderHome() {
+        const c=el('#home-render'); if(!c) return;
+        if(!S.auction){ 
+            c.innerHTML=`<div class="text-center py-16"><div class="w-20 h-20 bg-gray-100 rounded-full flex items-center justify-center mx-auto mb-4 text-gray-300"><span class="material-symbols-outlined text-4xl">inventory_2</span></div><h3 class="text-lg font-bold text-gray-800 mb-1">لا توجد مزادات</h3><p class="text-gray-400 text-xs mb-5">ترقب العروض القادمة</p><button onclick="Mazad.forceRefresh()" class="px-6 py-2.5 bg-white border border-gray-200 text-gray-700 rounded-full text-xs font-bold active:bg-gray-100"><span class="material-symbols-outlined text-xs align-middle">refresh</span> تحديث</button></div>`; 
+            el('#live-dot')?.classList.add('hidden'); 
+            return; 
+        }
+        const a=S.auction,live=a.status==='active',lb=a.bids?.[0]||null,imgs=Array.isArray(a.images)?a.images:[];
+        S.ui.lastBids=a.bids?.length||0; S.ui.lastPrice=a.current_price||0; S.ui.lastAucId=a.id; S.ui.lastStatus=a.status;
+        S.priceCache=a.current_price||0; S.bidCache=a.bids?a.bids.length:0; S.ui.priceVersion=a.price_version||0;
+        resetDOMCache();
+        const sHTML=imgs.length?imgs.map(s=>`<div class="slider-slide"><img src="${sz(s)}" class="img-blurred" loading="lazy" alt=""></div>`).join(''):`<div class="slider-slide flex items-center justify-center bg-gray-800"><span class="material-symbols-outlined text-4xl text-gray-500">image_not_supported</span></div>`;
+        const tHTML=imgs.length>1?`<div class="thumb-strip">${imgs.map((s,i)=>`<div class="thumb-item${i===0?' active':''}" onclick="event.stopPropagation();Mazad.openLB(${i})"><img src="${sz(s)}" loading="lazy" alt=""></div>`).join('')}</div>`:'';
+        const bHTML=lb?`<div class="bidder-card"><div class="bidder-avatar">${sz(lb.user).charAt(0)}</div><div class="flex-1 min-w-0"><p class="text-[10px] text-gray-400">المزايد الحالي</p><p class="font-bold text-gray-900 text-sm truncate" id="h-bidder">${sz(lb.user)}</p></div><span class="font-mono font-bold text-primary bg-white px-3 py-1.5 rounded-lg border border-green-200 text-sm" id="h-amount">${fc(lb.amount)} ر.س</span></div>`:`<div class="bidder-card"><div class="bidder-avatar" style="background:#d1d5db;color:#6b7280;">?</div><div class="flex-1 min-w-0"><p class="text-[10px] text-gray-400">المزايد الحالي</p><p class="font-bold text-gray-900 text-sm" id="h-bidder">لا يوجد</p></div></div>`;
+        c.innerHTML=`<div class="space-y-3"><div class="bg-white rounded-xl border border-gray-200 overflow-hidden"><div class="slider-box" style="aspect-ratio:4/3;"><div class="slider-track h-full" id="home-track">${sHTML}</div><div class="img-cover" onclick="Mazad.openLB(0)"><span class="material-symbols-outlined text-white text-5xl mb-2">photo_camera</span><span class="text-white text-sm font-bold bg-black/50 px-5 py-2 rounded-full">عرض الصور</span></div><div class="absolute top-3 right-3 flex gap-2"><span class="badge badge-live"><span class="w-1.5 h-1.5 ${live?'bg-green-500':'bg-gray-400'} rounded-full"></span>${live?'مباشر':'منتهي'}</span><span class="badge badge-verified"><span class="material-symbols-outlined text-[12px]">verified_user</span>موثوق</span></div><div class="absolute top-3 left-3 bg-black/50 backdrop-blur text-white px-2.5 py-1 rounded-full text-[10px] flex items-center gap-1.5"><span class="w-1.5 h-1.5 bg-green-400 rounded-full"></span><span id="h-viewers">${S.viewers}</span> يشاهد</div></div>${tHTML}<div class="p-3 sm:p-4 space-y-3"><div class="flex items-start justify-between gap-3"><h2 class="text-base sm:text-lg font-bold text-gray-900 leading-snug flex-1">${sz(a.title)}</h2><div class="flex gap-1.5 flex-shrink-0"><button onclick="Mazad.openDesc()" class="action-btn"><span class="material-symbols-outlined">description</span> وصف</button><button onclick="Mazad.openLB(0)" class="action-btn"><span class="material-symbols-outlined">photo_library</span> صور</button></div></div><div class="grid grid-cols-2 gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100"><div class="border-l border-gray-200 pl-3"><p class="text-[10px] text-gray-400 mb-1">أعلى مزايدة</p><div class="flex items-baseline gap-1"><span class="live-dot active"></span><span class="text-xl sm:text-2xl font-bold text-primary font-mono" id="h-price">${fc(a.current_price)}</span><span class="text-[10px] text-gray-400">ر.س</span></div></div><div class="text-right"><p class="text-[10px] text-gray-400 mb-1">متبقي</p><div class="font-mono text-xl sm:text-2xl font-bold text-gray-800" id="h-timer">--:--:--</div></div></div>${bHTML}<button onclick="Mazad.enterBid()" class="w-full bg-primary text-white py-3 sm:py-3.5 rounded-xl font-bold text-sm sm:text-base active:scale-[0.98] transition-all flex items-center justify-center gap-2"><span class="material-symbols-outlined text-xl">gavel</span> دخول المزاد والمزايدة</button></div></div></div>`;
+        if(live){ 
+            el('#live-dot')?.classList.remove('hidden'); 
+            document.querySelectorAll('.live-dot').forEach(d=>{d.classList.add('active');}); 
+        } else el('#live-dot')?.classList.add('hidden');
         
+        // بدء التحديث الفوري للعداد
+        startTimerUpdate();
+    }
+
+    function renderBidPage() {
+        const c=el('#bid-render'); if(!c) return;
+        if(!S.auction){ c.innerHTML=`<div class="text-center py-16 text-gray-400">لا يوجد مزاد</div>`; return; }
+        const a=S.auction,closed=a.status!=='active',lb=a.bids?.[0]||null,imgs=Array.isArray(a.images)?a.images:[];
+        S.ui.lastBids=a.bids?.length||0; S.ui.lastPrice=a.current_price||0; S.priceCache=a.current_price||0; S.bidCache=a.bids?a.bids.length:0; S.ui.priceVersion=a.price_version||0;
+        resetDOMCache();
+        const statusText = closed?(a.status==='sold'?'تم البيع':'انتهى الوقت'):'مباشر الآن';
+        updateDOMElement('bid-status-h', statusText, 'bidStatus');
+        el('#bid-status-h').className=`text-[9px] ${closed?'text-red-500':'text-green-500'}`;
+        const sHTML=imgs.length?imgs.map(s=>`<div class="slider-slide"><img src="${sz(s)}" class="img-blurred" loading="lazy" alt=""></div>`).join(''):`<div class="slider-slide flex items-center justify-center bg-gray-800"><span class="material-symbols-outlined text-4xl text-gray-500">image_not_supported</span></div>`;
+        const tHTML=imgs.length>1?`<div class="thumb-strip">${imgs.map((s,i)=>`<div class="thumb-item${i===0?' active':''}" onclick="event.stopPropagation();Mazad.openLB(${i})"><img src="${sz(s)}" loading="lazy" alt=""></div>`).join('')}</div>`:'';
+        const bHTML=lb?`<div class="bidder-card"><div class="bidder-avatar">${sz(lb.user).charAt(0)}</div><div class="flex-1 min-w-0"><p class="text-[10px] text-gray-400">المزايد الحالي</p><p class="font-bold text-gray-900 text-sm truncate" id="b-bidder">${sz(lb.user)}</p></div><span class="font-mono font-bold text-primary bg-white px-3 py-1.5 rounded-lg border border-green-200 text-sm" id="b-amount">${fc(lb.amount)} ر.س</span></div>`:`<div class="bidder-card"><div class="bidder-avatar" style="background:#d1d5db;color:#6b7280;">?</div><div class="flex-1 min-w-0"><p class="text-[10px] text-gray-400">المزايد الحالي</p><p class="font-bold text-gray-900 text-sm" id="b-bidder">لا يوجد</p></div></div>`;
+        let ctrl='';
+        if(closed){ 
+            ctrl=`<div class="bg-gray-100 p-5 rounded-xl text-center border border-gray-200"><span class="material-symbols-outlined text-4xl text-gray-400 mb-2 block">block</span><h3 class="font-bold text-gray-700">المزاد مغلق</h3><p class="text-xs text-gray-500 mt-1">${a.status==='sold'?'تم بيع السلعة للفائز':'انتهى وقت المزاد'}</p>${(lb&&a.status==='sold')?`<div class="mt-4 bg-white p-4 rounded-xl border border-green-200"><p class="text-xs text-gray-400">الفائز</p><p class="font-bold text-lg text-primary">${sz(lb.user)} 🏆</p><p class="font-mono font-bold text-base mt-1">${fc(lb.amount)} ر.س</p></div>`:''}</div>`; 
+        } else { 
+            ctrl=`<div class="bg-white p-4 rounded-xl border border-gray-200"><h3 class="font-bold text-gray-800 text-sm mb-3">اختر قيمة الزيادة</h3><div class="grid grid-cols-5 gap-2 mb-4">${[10,50,100,200,500].map(v=>`<button onclick="Mazad.setInc(${v},this)" class="bid-chip h-12 rounded-xl font-bold text-xs flex items-center justify-center${v===S.ui.inc?' selected':''}">+${v}</button>`).join('')}</div><div class="bg-gradient-to-r from-primary/5 to-primary/10 rounded-xl p-3 mb-4 text-center border border-primary/10"><p class="text-[10px] text-gray-400 mb-1">قيمة مزايدتك</p><p class="text-3xl font-bold text-primary font-mono" id="b-projected">${fc((a.current_price||0)+S.ui.inc)}</p><p class="text-[10px] text-gray-400 mt-1">ريال سعودي</p></div><button onclick="Mazad.showConfirm()" class="btn-bid-submit w-full bg-primary text-white py-3.5 rounded-xl font-bold text-sm active:scale-[0.98] transition-all relative"><span class="btn-content flex items-center justify-center gap-2"><span class="material-symbols-outlined text-lg">check_circle</span> تأكيد وإرسال المزايدة</span><span class="btn-spinner-wrap"><span class="btn-spinner"></span><span class="btn-countdown"></span></span></button></div>`; 
+        }
+        c.innerHTML=`<div class="bg-white rounded-xl border border-gray-200 overflow-hidden"><div class="slider-box" style="aspect-ratio:4/3;"><div class="slider-track h-full" id="bid-track">${sHTML}</div><div class="img-cover" onclick="Mazad.openLB(0)"><span class="material-symbols-outlined text-white text-5xl mb-2">photo_camera</span><span class="text-white text-sm font-bold bg-black/50 px-5 py-2 rounded-full">عرض الصور</span></div></div>${tHTML}</div><div class="bg-white p-4 rounded-xl border border-gray-200"><div class="flex items-start justify-between gap-3 mb-3"><h1 class="text-base sm:text-lg font-bold text-gray-900 leading-snug flex-1">${sz(a.title)}</h1><div class="flex gap-1.5 flex-shrink-0"><button onclick="Mazad.openDesc()" class="action-btn"><span class="material-symbols-outlined">description</span> وصف</button><button onclick="Mazad.openLB(0)" class="action-btn"><span class="material-symbols-outlined">photo_library</span> صور</button></div></div><div class="grid grid-cols-2 gap-3 bg-gray-50 p-3 rounded-xl border border-gray-100 mb-3"><div class="border-l border-gray-200 pl-3"><p class="text-[10px] text-gray-400 mb-1">السعر الحالي</p><div class="flex items-baseline gap-1"><span class="live-dot active"></span><span class="text-xl sm:text-2xl font-bold text-primary font-mono" id="b-price">${fc(a.current_price)}</span><span class="text-[10px] text-gray-400">ر.س</span></div></div><div class="text-right"><p class="text-[10px] text-gray-400 mb-1">متبقي</p><div class="font-mono text-xl sm:text-2xl font-bold text-gray-800" id="b-timer">--:--:--</div></div></div>${bHTML}</div>${ctrl}<div class="bg-white rounded-xl border border-gray-200 overflow-hidden"><div class="px-4 py-3 border-b border-gray-100 bg-gray-50 flex justify-between items-center"><h3 class="text-xs font-bold text-gray-700 flex items-center gap-2"><span class="material-symbols-outlined text-gray-400 text-base">history</span> آخر المزايدين</h3><span class="text-[9px] bg-green-100 text-green-700 px-2 py-0.5 rounded-full">مباشر</span></div><div class="divide-y divide-gray-50 max-h-60 overflow-y-auto" id="bids-list">${renderBids(a.bids||[])}</div></div>`;
+        if(!closed) document.querySelectorAll('.live-dot').forEach(d=>d.classList.add('active'));
+        
+        // بدء التحديث الفوري للعداد
+        startTimerUpdate();
+    }
+
+    function renderBids(bids) { 
+        if(!bids?.length) return '<div class="p-6 text-center text-gray-400 text-xs">كن أول من يزايد!</div>'; 
+        return bids.slice(0,4).map((b,i)=>{ 
+            const first=i===0,me=S.user.loggedIn&&b.user===S.user.name; 
+            let ac='bg-gray-100 text-gray-600'; 
+            if(first) ac='bg-gradient-to-br from-yellow-400 to-amber-500 text-white'; 
+            else if(me) ac='bg-primary/10 text-primary'; 
+            return `<div class="px-4 py-3 flex justify-between items-center${me?' bg-green-50/50':''}"><div class="flex items-center gap-3 min-w-0"><div class="w-9 h-9 rounded-full flex-shrink-0 flex items-center justify-center text-[10px] font-bold ${ac}">${first?'👑':sz(b.user).charAt(0)}</div><div class="min-w-0"><p class="text-xs font-bold truncate${first?' text-yellow-700':me?' text-primary':' text-gray-800'}">${sz(b.user)}${me?' <span class="text-[8px] bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full mr-1">أنت</span>':''}</p><p class="text-[9px] text-gray-400">${b.time||'الآن'}</p></div></div><span class="font-mono font-bold flex-shrink-0 text-xs${first?' text-primary':' text-gray-600'}">${fc(b.amount)} ر.س</span></div>`; 
+        }).join(''); 
+    }
+
+    // ===== نظام التحديث الفائق السرعة 1ms =====
+    
+    // بدء تحديث المؤقت
+    function startTimerUpdate() {
+        if(S.timers.clock) clearInterval(S.timers.clock);
+        S.timers.clock = setInterval(() => {
+            if(!S.auction || !S.auction.end_time) return;
+            const now = Math.floor(Date.now() / 1000);
+            const diff = S.auction.end_time - now;
+            const exp = diff <= 0;
+            const ts = exp ? 'انتهى المزاد' : `${String(Math.floor(diff/3600)).padStart(2,'0')}:${String(Math.floor((diff%3600)/60)).padStart(2,'0')}:${String(diff%60).padStart(2,'0')}`;
+            
+            // تحديث مباشر للعناصر بدون إعادة رسم
+            updateDOMElement('h-timer', ts, 'hTimer');
+            updateDOMElement('b-timer', ts, 'bTimer');
+            
+            if(exp) {
+                const ht = el('#h-timer');
+                if(ht && !ht.classList.contains('text-red-500')) ht.classList.add('text-red-500');
+                const bt = el('#b-timer');
+                if(bt && !bt.classList.contains('text-red-500')) bt.classList.add('text-red-500');
+            }
+            
+            S.frameCount++;
+        }, SYNC_INTERVAL);
+    }
+    
+    // جلب البيانات بسرعة فائقة
+    async function fastDataSync() {
+        if(S.ui.fetching) return;
+        S.ui.fetching = true;
         try {
-            // استخدام ذاكرة تخزين مؤقتة لتسريع الاستجابة
-            const cacheKey = 'auctions_data';
-            const res = await fetch('auctions_db.json?' + now, {
+            const r = await fetch('auctions_db.json?t=' + Date.now(), {
                 cache: 'no-store',
                 headers: { 'Cache-Control': 'no-cache' }
             });
+            if(!r.ok) throw new Error('N');
+            const data = await r.json();
+            const active = Array.isArray(data) ? data.find(a => a.status === 'active') : null;
+            const prevId = S.ui.lastAucId;
+            const newId = active?.id || null;
             
-            if (!res.ok) return;
-            
-            const auctions = await res.json();
-            dataCache = auctions; // تحديث الكاش
-            
-            const activeAuc = auctions.find(a => a.status === 'active');
-            
-            // لا يوجد مزاد نشط مسبقاً وظهر الآن
-            if (!auctionData && activeAuc) {
-                auctionData = { ...activeAuc, images: Array.isArray(activeAuc.images) ? activeAuc.images : [], bids: Array.isArray(activeAuc.bids) ? activeAuc.bids : [] };
-                auctionEnded = false;
-                buildHomeContent();
-                buildBidContent();
-                startSlider();
-                updateTimers();
-                updatePriceUI(false);
-                renderBidsLog();
-                checkAuctionStatus();
-                updateExpectedPrice();
-                updateNavHighlight('home');
-                return;
-            }
-            
-            // المزاد اختفى
-            if (auctionData && !activeAuc) {
-                if (!auctionEnded) {
-                    handleAuctionEnd(); // إعلان الفائز عند الاختفاء
-                }
-                auctionData = null;
-                buildEmptyHome();
-                document.getElementById('bid-main-content').innerHTML = '';
-                updateNavHighlight('home');
-                return;
-            }
-            
-            // تحديث البيانات
-            if (auctionData && activeAuc && activeAuc.id === auctionData.id) {
-                const bidsChanged = JSON.stringify(activeAuc.bids) !== JSON.stringify(auctionData.bids);
-                const priceChanged = activeAuc.current_price !== auctionData.current_price;
-                const statusChanged = activeAuc.status !== auctionData.status;
+            if(active) {
+                const aucCh = prevId !== newId;
+                const prCh = S.ui.lastPrice !== active.current_price;
+                const bdCh = S.ui.lastBids !== (active.bids?.length || 0);
+                const stCh = S.ui.lastStatus !== active.status;
                 
-                if (bidsChanged || priceChanged || statusChanged) {
-                    auctionData = { ...activeAuc, images: auctionData.images, bids: Array.isArray(activeAuc.bids) ? activeAuc.bids : [] };
+                S.auction = active;
+                S.ui.lastAucId = newId;
+                S.ui.lastPrice = active.current_price || 0;
+                S.ui.lastBids = active.bids?.length || 0;
+                S.ui.lastStatus = active.status;
+                
+                const ld = el('#live-dot');
+                if(ld) {
+                    if(active.status === 'active') ld.classList.remove('hidden');
+                    else ld.classList.add('hidden');
+                }
+                
+                if(aucCh || stCh) {
+                    // تحديث كامل
+                    renderHome();
+                    if(S.ui.currentPage === 'bid') {
+                        if(active.status === 'active') {
+                            renderBidPage();
+                            if(S.ui.bidLocked) unlockBidButton();
+                        } else {
+                            openModal('modal-ended');
+                            showPage('home');
+                        }
+                    }
+                } else if(prCh || bdCh) {
+                    // تحديث جزئي فائق السرعة
+                    const np = active.current_price || 0;
+                    const nb = active.bids ? active.bids.length : 0;
+                    const pv = active.price_version || 0;
                     
-                    // إذا تغيرت الحالة إلى غير نشط
-                    if (statusChanged && activeAuc.status !== 'active') {
-                        handleAuctionEnd();
+                    if(np !== S.priceCache || pv !== S.ui.priceVersion) {
+                        S.priceCache = np;
+                        S.ui.priceVersion = pv;
+                        pulseLiveDot();
+                        const npStr = fc(np);
+                        if(updateDOMElement('h-price', npStr, 'hPrice')) flashPrice(el('#h-price'));
+                        if(updateDOMElement('b-price', npStr, 'bPrice')) flashPrice(el('#b-price'));
+                        const bpr = el('#b-projected');
+                        if(bpr) {
+                            const pvStr = fc(np + S.ui.inc);
+                            if(bpr.textContent !== pvStr) bpr.textContent = pvStr;
+                        }
                     }
                     
-                    updatePriceUI(priceChanged);
-                    renderBidsLog();
-                    checkAuctionStatus();
-                    updateExpectedPrice();
+                    if(nb !== S.bidCache) {
+                        S.bidCache = nb;
+                        const lb = active.bids?.[0];
+                        updateDOMElement('h-bidder', lb ? sz(lb.user) : 'لا يوجد', 'hBidder');
+                        updateDOMElement('b-bidder', lb ? sz(lb.user) : 'لا يوجد', 'bBidder');
+                        updateDOMElement('h-amount', lb ? fc(lb.amount) + ' ر.س' : '', 'hAmount');
+                        updateDOMElement('b-amount', lb ? fc(lb.amount) + ' ر.س' : '', 'bAmount');
+                        const bl = el('#bids-list');
+                        if(bl) {
+                            const nh = renderBids(active.bids || []);
+                            if(updateDOMHTML('bids-list', nh, 'bidsHTML')) animateBids();
+                        }
+                    }
+                    
+                    updateDOMElement('h-viewers', String(S.viewers), 'viewers');
+                    
+                    if(prCh && S.ui.bidLocked) unlockBidButton();
                 }
+                
+                // التحقق من وجود إشعارات جديدة من لوحة التحكم
+                checkAdminNotifications(active);
+            } else {
+                if(S.auction) {
+                    S.auction = null;
+                    S.ui.lastAucId = null;
+                    S.ui.lastStatus = null;
+                    renderHome();
+                    if(S.ui.currentPage === 'bid') {
+                        openModal('modal-ended');
+                        showPage('home');
+                    }
+                }
+                el('#live-dot')?.classList.add('hidden');
             }
         } catch(e) {
-            console.error('Fetch error:', e);
+            // تجاهل الأخطاء في التحديث السريع
+        } finally {
+            S.ui.fetching = false;
         }
     }
     
-    // =============== معالجة انتهاء المزاد وإعلان الفائز ===============
-    function handleAuctionEnd() {
-        if (auctionEnded || !auctionData) return;
-        auctionEnded = true;
+    // التحقق من إشعارات لوحة التحكم
+    function checkAdminNotifications(auction) {
+        if(!auction || !auction.admin_notifications) return;
+        const notifs = auction.admin_notifications;
+        if(!Array.isArray(notifs) || notifs.length === 0) return;
         
-        const winner = auctionData.bids?.[0]; // أعلى مزايد (الأول في المصفوفة)
-        const notification = document.getElementById('winner-notification');
-        
-        if (winner && notification) {
-            document.getElementById('winner-name').innerText = winner.user;
-            document.getElementById('winner-bid').innerText = Number(winner.amount).toLocaleString() + ' ر.س';
-            notification.classList.remove('hidden');
+        const lastNotif = notifs[notifs.length - 1];
+        if(lastNotif.timestamp > S.lastNotifCheck) {
+            S.lastNotifCheck = lastNotif.timestamp;
             
-            // إخفاء الإشعار بعد 8 ثوانٍ
-            setTimeout(() => {
-                notification.classList.add('hidden');
-            }, 8000);
-        }
-        
-        // تعطيل أزرار المزايدة
-        checkAuctionStatus();
-        
-        // العودة للصفحة الرئيسية إذا كنا في صفحة المزايدة
-        if (document.getElementById('bid-page').classList.contains('active')) {
-            // إبقاء المستخدم في صفحة المزايدة لرؤية النتيجة، لكن مع تعطيل الزر
-        }
-    }
-
-    function checkAuctionStatus() {
-        if (!auctionData) return;
-        const btn = document.getElementById('main-action-btn');
-        const confirmBtn = document.getElementById('confirm-bid-btn');
-        const controls = document.getElementById('bidding-controls');
-        const stoppedMsg = document.getElementById('stopped-message');
-        const navDot = document.getElementById('nav-auction-dot');
-        
-        if (auctionData.status !== 'active') {
-            if (btn) {
-                btn.innerText = auctionData.status === 'sold' ? "تم بيع السلعة" : "تم إيقاف المزاد";
-                btn.classList.add(auctionData.status === 'sold' ? 'bg-red-500' : 'bg-gray-400', 'cursor-not-allowed');
-                btn.classList.remove('bg-primary', 'hover:bg-primary-dark');
-                btn.onclick = null;
+            // إظهار النافذة المنبثقة إذا لم يختر المستخدم عدم الظهور
+            if(!dontShowPopup && !el('#modal-notif-popup')?.classList.contains('hidden') === false) {
+                showNotifPopup(lastNotif);
             }
-            if(controls) controls.classList.add('hidden');
-            if(stoppedMsg) stoppedMsg.classList.remove('hidden');
-            if(confirmBtn) {
-                confirmBtn.disabled = true;
-                confirmBtn.classList.add('opacity-50', 'cursor-not-allowed');
-                confirmBtn.innerHTML = '<span class="material-symbols-outlined">block</span> المزاد منتهي';
-            }
-            if(navDot) navDot.classList.add('hidden');
-        } else {
-            if(controls) controls.classList.remove('hidden');
-            if(stoppedMsg) stoppedMsg.classList.add('hidden');
-            if(confirmBtn) {
-                confirmBtn.disabled = false;
-                confirmBtn.classList.remove('opacity-50', 'cursor-not-allowed');
-                confirmBtn.innerHTML = '<span class="material-symbols-outlined">check_circle</span> تأكيد وإرسال المزايدة';
-            }
-            if(navDot && auctionData) navDot.classList.remove('hidden');
+            
+            // تحديث قائمة الإشعارات
+            updateNotifList(notifs);
         }
-    }
-
-    function simulateViewers() {
-        setInterval(() => {
-            viewersCount += Math.floor(Math.random() * 3) - 1;
-            if (viewersCount < 8) viewersCount = 8;
-            if (viewersCount > 35) viewersCount = 35;
-            const homeEl = document.getElementById('viewers-count-home');
-            const bidEl = document.getElementById('viewers-count-bid');
-            if(homeEl) homeEl.innerText = viewersCount;
-            if(bidEl) bidEl.innerText = viewersCount;
-        }, 4000);
-    }
-
-    // =============== التنبيهات ===============
-    async function checkNotifications() {
-        try {
-            const res = await fetch('latest_notif.json?' + new Date().getTime(), { cache: 'no-store' });
-            if(res.ok) {
-                const notif = await res.json();
-                if (notif && notif.title && notif.time > lastNotifTime) {
-                    lastNotifTime = notif.time;
-                    currentNotifId = notif.id || 'notif_'+notif.time;
-                    document.getElementById('notif-badge').classList.remove('hidden');
-                    
-                    const dontShow = localStorage.getItem('dontShowNotifUntil');
-                    if (!dontShow || parseInt(dontShow) < notif.time) {
-                        document.getElementById('popup-title').innerText = notif.title;
-                        document.getElementById('popup-msg').innerText = notif.msg;
-                        document.getElementById('notif-popup').classList.remove('hidden');
-                        document.getElementById('dont-show-again').checked = false;
-                    }
-                    updateNotifListModal();
-                } else if (!notif || !notif.title) {
-                    document.getElementById('notif-popup').classList.add('hidden');
-                    document.getElementById('notif-badge').classList.add('hidden');
-                    currentNotifId = null;
-                }
-            }
-        } catch(e) {}
-    }
-
-    function markNotifAsRead() {
-        if (document.getElementById('dont-show-again').checked) {
-            localStorage.setItem('dontShowNotifUntil', lastNotifTime);
-        }
-        document.getElementById('notif-popup').classList.add('hidden');
-        if (currentNotifId) {
-            sessionStorage.setItem('read_notif_'+currentNotifId, '1');
-        }
-    }
-
-    // =============== الانتقال السريع بين الصفحات (SPA) ===============
-    function showLoader() {
-        document.getElementById('page-loader').classList.remove('hidden');
-    }
-    function hideLoader() {
-        document.getElementById('page-loader').classList.add('hidden');
-    }
-
-    function openBidPage() {
-        if (!auctionData) return;
-        if (!isLoggedIn) {
-            document.getElementById('login-required-modal').classList.remove('hidden');
-            return;
-        }
-        
-        // انتقال فوري بدون تحميل (البيانات موجودة مسبقاً)
-        const homePage = document.getElementById('home-page');
-        const bidPage = document.getElementById('bid-page');
-        
-        homePage.classList.remove('active');
-        bidPage.classList.add('active');
-        updateNavHighlight('auction');
-        
-        // تحديث سريع للبيانات في الخلفية
-        fetchFreshData(true);
-        
-        // تمرير للأعلى
-        window.scrollTo({ top: 0, behavior: 'instant' });
-    }
-
-    function switchToHome() {
-        const bidPage = document.getElementById('bid-page');
-        const homePage = document.getElementById('home-page');
-        
-        bidPage.classList.remove('active');
-        homePage.classList.add('active');
-        updateNavHighlight('home');
-        
-        // إخفاء إشعار الفائز إذا كان ظاهراً
-        document.getElementById('winner-notification')?.classList.add('hidden');
-        
-        // تحديث سريع للبيانات
-        fetchFreshData(true);
-        
-        window.scrollTo({ top: 0, behavior: 'instant' });
     }
     
-    function updateNavHighlight(page) {
-        const homeBtn = document.getElementById('nav-home');
-        const auctionBtn = document.getElementById('nav-auction');
-        
-        if (page === 'home') {
-            homeBtn?.classList.add('text-primary');
-            homeBtn?.querySelector('.material-symbols-outlined')?.setAttribute('style', "font-variation-settings: 'FILL' 1;");
-            auctionBtn?.classList.remove('text-primary');
-            auctionBtn?.classList.add('text-gray-400');
-            auctionBtn?.querySelector('.material-symbols-outlined')?.setAttribute('style', "font-variation-settings: 'FILL' 0;");
-        } else {
-            auctionBtn?.classList.add('text-primary');
-            auctionBtn?.classList.remove('text-gray-400');
-            homeBtn?.classList.remove('text-primary');
-            homeBtn?.classList.add('text-gray-400');
-            homeBtn?.querySelector('.material-symbols-outlined')?.setAttribute('style', "font-variation-settings: 'FILL' 0;");
-            auctionBtn?.querySelector('.material-symbols-outlined')?.setAttribute('style', "font-variation-settings: 'FILL' 1;");
+    function showNotifPopup(notif) {
+        const msg = el('#notif-popup-msg');
+        const time = el('#notif-popup-time');
+        if(msg) msg.textContent = notif.message || 'يوجد تحديث جديد في المزاد';
+        if(time) time.textContent = notif.time || 'الآن';
+        openModal('modal-notif-popup');
+    }
+    
+    function dismissNotifPopup() {
+        const checkbox = el('#dont-show-again');
+        if(checkbox && checkbox.checked) {
+            localStorage.setItem('dont_show_notif_popup', 'true');
         }
+        closeModal('modal-notif-popup');
+    }
+    
+    function updateNotifList(notifs) {
+        const nl = el('#notif-list');
+        if(!nl) return;
+        const items = notifs.slice(-5).map(n => 
+            `<div class="flex items-start gap-3 p-3 bg-amber-50 rounded-xl border border-amber-100">
+                <span class="material-symbols-outlined text-amber-600 text-lg mt-0.5 flex-shrink-0">campaign</span>
+                <div>
+                    <p class="text-xs font-bold text-gray-800">${sz(n.message || 'إشعار جديد')}</p>
+                    <p class="text-[9px] text-gray-400 mt-1">${n.time || 'الآن'}</p>
+                </div>
+            </div>`
+        ).join('');
+        nl.innerHTML = items || '<div class="text-center py-8 text-gray-400"><span class="material-symbols-outlined text-4xl mb-2 block">notifications_off</span><p class="text-xs">لا توجد إشعارات</p></div>';
     }
 
-    // =============== السلايدر ===============
-    function renderSlider(wrapperId, dotsId) {
-        if(!auctionData?.images?.length) return;
-        const wrapper = document.getElementById(wrapperId);
-        const dotsContainer = document.getElementById(dotsId);
-        if(!wrapper || !dotsContainer) return;
-        wrapper.innerHTML = auctionData.images.map(src => `<div class="slide h-full"><img src="${src}" class="w-full h-full object-cover" loading="lazy"></div>`).join('');
-        dotsContainer.innerHTML = auctionData.images.map((_, idx) => `<div class="w-2 h-2 rounded-full transition-all duration-300 ${idx === 0 ? 'bg-white w-4' : 'bg-white/50'}" id="${dotsId}-dot-${idx}"></div>`).join('');
+    // ===== مزايدة =====
+    function setInc(v,btn){
+        S.ui.inc=v;
+        document.querySelectorAll('.bid-chip').forEach(b=>b.classList.remove('selected'));
+        if(btn)btn.classList.add('selected');
+        const p=el('#b-projected');
+        if(p&&S.auction)p.textContent=fc((S.auction.current_price||0)+v);
     }
-
-    function startSlider() {
-        if(slideInterval) clearInterval(slideInterval);
-        slideInterval = setInterval(() => nextSlide(), 4000);
+    
+    function showConfirm(){
+        if(!S.auction||S.auction.status!=='active'){
+            if(S.auction&&S.auction.status!=='active')openModal('modal-ended');
+            return;
+        }
+        if(S.ui.bidLocked)return;
+        const ca=el('#confirm-val');
+        if(ca)ca.textContent=fc((S.auction.current_price||0)+S.ui.inc);
+        openModal('modal-confirm');
     }
-
-    function nextSlide(context) {
-        if(!auctionData?.images?.length) return;
-        currentSlide = (currentSlide + 1) % auctionData.images.length;
-        updateSliderPosition();
-    }
-
-    function prevSlide(context) {
-        if(!auctionData?.images?.length) return;
-        currentSlide = (currentSlide - 1 + auctionData.images.length) % auctionData.images.length;
-        updateSliderPosition();
-    }
-
-    function updateSliderPosition() {
-        ['home-slider-wrapper', 'bid-slider-wrapper'].forEach(id => {
-            const el = document.getElementById(id);
-            if(el) el.style.transform = `translateX(-${currentSlide * 100}%)`;
-        });
-        const lbImg = document.getElementById('lightbox-img');
-        if(lbImg && auctionData.images?.[currentSlide]) lbImg.src = auctionData.images[currentSlide];
-        ['home-dots', 'bid-dots'].forEach(prefix => {
-            auctionData.images?.forEach((_, idx) => {
-                const dot = document.getElementById(`${prefix}-dot-${idx}`);
-                if(dot) dot.className = idx === currentSlide ? "w-4 h-2 rounded-full bg-white transition-all duration-300" : "w-2 h-2 rounded-full bg-white/50 transition-all duration-300";
+    
+    async function submitBid(){
+        if(!S.auction?.id||S.ui.bidLocked)return;
+        if(S.auction.status!=='active'){closeModal('modal-confirm');openModal('modal-ended');return;}
+        closeModal('modal-confirm');
+        lockBidButton();
+        const fd=new FormData();
+        fd.append('action','place_bid');
+        fd.append('auction_id',S.auction.id);
+        fd.append('amount',S.ui.inc);
+        fd.append('user',S.user.name);
+        fd.append('phone',S.user.phone);
+        fd.append('client_token',CLIENT_TOKEN);
+        try{
+            const r=await fetch('adminn.php',{
+                method:'POST',
+                body:fd,
+                cache:'no-store',
+                headers:{'X-Client-Token':CLIENT_TOKEN}
             });
-        });
-    }
-
-    function openLightbox() {
-        if(!auctionData) return;
-        updateSliderPosition();
-        document.getElementById('lightbox-modal').classList.remove('hidden');
-    }
-    function closeLightbox() { document.getElementById('lightbox-modal').classList.add('hidden'); }
-
-    // =============== المزايدة ===============
-    function selectAmount(btn, amount) {
-        document.querySelectorAll('.bid-chip').forEach(b => b.classList.remove('selected'));
-        btn.classList.add('selected');
-        selectedIncrement = amount;
-        updateExpectedPrice();
-    }
-
-    function updateExpectedPrice() {
-        if (!auctionData) return;
-        const newPrice = auctionData.current_price + selectedIncrement;
-        const el = document.getElementById('expected-new-price');
-        if (el) el.innerText = Number(newPrice).toLocaleString();
-    }
-
-    function confirmBidAction() {
-        if (!isLoggedIn) {
-            document.getElementById('login-required-modal').classList.remove('hidden');
-            return;
-        }
-        if (!auctionData || auctionData.status !== 'active') {
-            alert('هذا المزاد غير نشط حالياً');
-            return;
-        }
-        document.getElementById('pledge-modal').classList.remove('hidden');
-    }
-
-    async function finalizeBid() {
-        document.getElementById('pledge-modal').classList.add('hidden');
-        const formData = new FormData();
-        formData.append('action', 'place_bid');
-        formData.append('auction_id', auctionData.id);
-        formData.append('amount', selectedIncrement);
-        formData.append('user', currentUserDisplayName);
-        formData.append('phone', currentUserPhone);
-        try {
-            const res = await fetch('adminn.php', { method: 'POST', body: formData });
-            const result = await res.json();
-            if(result.status === 'success') {
-                // جلب فوري للبيانات الجديدة
-                lastFetchTime = 0; // إعادة تعيين debounce للجلب الفوري
-                await fetchFreshData(true);
-                
-                const btn = document.getElementById('confirm-bid-btn');
-                if(btn) {
-                    btn.innerHTML = '<span class="material-symbols-outlined">check</span> تمت المزايدة بنجاح';
-                    btn.classList.add('!bg-green-600');
-                    setTimeout(() => {
-                        btn.innerHTML = '<span class="material-symbols-outlined">check_circle</span> تأكيد وإرسال المزايدة';
-                        btn.classList.remove('!bg-green-600');
-                    }, 2000);
-                }
+            const d=await r.json();
+            if(d.status==='success'){
+                await fastDataSync();
+                if(S.ui.currentPage==='bid')renderBidPage();
             } else {
-                alert(result.message || 'حدث خطأ');
+                unlockBidButton();
+                alert(d.message||'حدث خطأ');
             }
-        } catch (e) {
+        }catch(e){
+            unlockBidButton();
             alert('فشل الاتصال');
         }
     }
 
-    // =============== تحديث السعر بشكل ديناميكي مع تأثير ===============
-    function updatePriceUI(animate = true) {
-        if(!auctionData) return;
-        const formatted = Number(auctionData.current_price).toLocaleString();
-        const bidCurrent = document.getElementById('bid-current-price');
-        const homePrice = document.getElementById('home-price');
-        
-        if(bidCurrent && bidCurrent.innerText !== formatted) {
-            bidCurrent.innerText = formatted;
-            if(animate) {
-                bidCurrent.classList.add('price-pop');
-                clearTimeout(pricePopTimeout);
-                pricePopTimeout = setTimeout(() => bidCurrent.classList.remove('price-pop'), 500);
-            }
-        } else if(bidCurrent) {
-            bidCurrent.innerText = formatted;
-        }
-        
-        if(homePrice && homePrice.innerText !== formatted) {
-            homePrice.innerText = formatted;
-            if(animate) {
-                homePrice.classList.add('price-pop');
-                clearTimeout(pricePopTimeout);
-                pricePopTimeout = setTimeout(() => homePrice.classList.remove('price-pop'), 500);
-            }
-        } else if(homePrice) {
-            homePrice.innerText = formatted;
-        }
-        
-        const lastBidder = auctionData.bids?.[0];
-        const bidderEl = document.getElementById('home-bidder');
-        const avatarEl = document.getElementById('home-bidder-avatar');
-        if(bidderEl) bidderEl.innerText = lastBidder ? lastBidder.user : "لا يوجد";
-        if(avatarEl) avatarEl.innerText = lastBidder ? lastBidder.user.charAt(0) : "؟";
+    function simViewers(){
+        if(S.timers.viewers)clearInterval(S.timers.viewers);
+        S.timers.viewers=setInterval(()=>{
+            S.viewers+=Math.random()>0.5?1:-1;
+            S.viewers=Math.max(1,Math.min(25,S.viewers));
+        },2000);
+    }
+    
+    function toggleNotif(){
+        const p=el('#notif-panel');
+        if(!p)return;
+        p.classList.toggle('hidden');
+    }
+    
+    function closeNotif(){
+        el('#notif-panel')?.classList.add('hidden');
     }
 
-    function renderBidsLog() {
-        if(!auctionData?.bids) return;
-        const container = document.getElementById('bids-log');
-        if(!container) return;
-        const top4 = auctionData.bids.slice(0, 4);
-        container.innerHTML = top4.map((bid, index) => {
-            const isMe = bid.user === currentUserDisplayName;
-            const isWinner = index === 0 && auctionData.status !== 'active'; // الفائز هو الأول عند انتهاء المزاد
-            return `<div class="px-4 py-3 flex justify-between items-center ${isMe ? 'bg-green-50/70' : ''} ${isWinner ? 'bg-yellow-50/70' : ''}">
-                <div class="flex items-center gap-3">
-                    <div class="w-9 h-9 rounded-full ${isWinner ? 'bg-yellow-400 text-white' : (isMe ? 'bg-primary text-white' : 'bg-gray-100 text-gray-600')} flex items-center justify-center text-sm font-bold">
-                        ${isWinner ? '👑' : bid.user.charAt(0)}
-                    </div>
-                    <div>
-                        <p class="text-sm font-bold ${isWinner ? 'text-yellow-700' : (isMe ? 'text-primary' : 'text-gray-800')}">
-                            ${bid.user} ${isWinner ? '🏆' : ''}
-                        </p>
-                        <p class="text-[10px] text-gray-400">${bid.time || ''}</p>
-                    </div>
-                </div>
-                <span class="font-mono font-bold ${isWinner ? 'text-yellow-600' : (isMe ? 'text-green-600' : 'text-primary')}">${Number(bid.amount).toLocaleString()} ر.س</span>
-            </div>`;
-        }).join('');
-        
-        if (top4.length === 0) {
-            container.innerHTML = '<div class="px-4 py-6 text-center text-gray-400 text-sm">لا توجد مزايدات بعد</div>';
+    function openLB(i=0){
+        if(!S.auction?.images?.length)return;
+        S.ui.lbIdx=i;
+        updateLB();
+        const lb=el('#lightbox-full');
+        if(lb){lb.classList.remove('hidden');document.body.style.overflow='hidden';}
+    }
+    
+    function closeLB(){
+        el('#lightbox-full')?.classList.add('hidden');
+        document.body.style.overflow='';
+    }
+    
+    function lbNav(d){
+        const imgs=S.auction?.images;
+        if(!imgs?.length)return;
+        S.ui.lbIdx=(S.ui.lbIdx+d+imgs.length)%imgs.length;
+        updateLB();
+    }
+    
+    function updateLB(){
+        const imgs=S.auction?.images;
+        if(!imgs?.length)return;
+        const img=el('#lb-img');
+        if(img)img.src=imgs[S.ui.lbIdx];
+        const c=el('#lb-counter');
+        if(c)c.textContent=`${S.ui.lbIdx+1}/${imgs.length}`;
+        const dots=el('#lb-dots');
+        if(dots)dots.innerHTML=imgs.map((_,i)=>`<div class="w-1.5 h-1.5 rounded-full${i===S.ui.lbIdx?' bg-white w-3':' bg-white/40'}"></div>`).join('');
+    }
+
+    function openModal(id){
+        const m=el('#'+id);
+        if(!m)return;
+        m.classList.remove('hidden');
+        m.onclick=function(e){if(e.target===m)closeModal(id);};
+    }
+    
+    function closeModal(id){
+        el('#'+id)?.classList.add('hidden');
+    }
+    
+    function openDesc(){
+        if(S.auction){
+            const dt=el('#desc-content');
+            if(dt)dt.textContent=S.auction.desc||'لا يوجد وصف';
+            openModal('modal-desc');
         }
     }
+    
+    function share(){
+        if(!S.auction)return;
+        const sd={
+            title:S.auction.title||'مزاد',
+            text:`شاهد مزاد ${S.auction.title||''}`,
+            url:location.href
+        };
+        if(navigator.share)navigator.share(sd).catch(()=>{});
+        else if(navigator.clipboard)navigator.clipboard.writeText(location.href).then(()=>alert('تم نسخ الرابط'));
+    }
 
-    function updateTimers() {
-        if(!auctionData) return;
-        const endTime = auctionData.end_time * 1000;
-        const distance = endTime - Date.now();
-        const bidTimer = document.getElementById('bid-timer');
-        const homeTimer = document.getElementById('home-timer');
+    function init(){
+        renderHome(); 
+        simViewers();
         
-        if (distance <= 0) {
-            if(bidTimer) bidTimer.innerText = "00:00:00";
-            if(homeTimer) homeTimer.innerHTML = `<span class='text-red-500 font-bold'>انتهى المزاد</span>`;
-            
-            // تفعيل انتهاء المزاد تلقائياً
-            if (auctionData.status === 'active' && !auctionEnded) {
-                auctionData.status = 'ended';
-                handleAuctionEnd();
-                // إجبار جلب جديد للتأكد من الحالة على السيرفر
-                fetchFreshData(true);
-            }
-            return;
-        }
-        
-        const h = Math.floor((distance % 86400000) / 3600000);
-        const m = Math.floor((distance % 3600000) / 60000);
-        const s = Math.floor((distance % 60000) / 1000);
-        const timeString = `${h.toString().padStart(2,'0')}:${m.toString().padStart(2,'0')}:${s.toString().padStart(2,'0')}`;
-        
-        if(bidTimer) bidTimer.innerText = timeString;
-        if(homeTimer) homeTimer.innerHTML = `
-            <div class="flex flex-col items-center"><span class="text-3xl">${h}</span><span class="text-[10px]">ساعة</span></div>
-            <span class="text-3xl">:</span>
-            <div class="flex flex-col items-center"><span class="text-3xl">${m}</span><span class="text-[10px]">دقيقة</span></div>
-            <span class="text-3xl">:</span>
-            <div class="flex flex-col items-center"><span class="text-3xl text-primary">${s}</span><span class="text-[10px]">ثانية</span></div>`;
-    }
-
-    function openDescription() {
-        if(auctionData) {
-            document.getElementById('desc-text').innerText = auctionData.desc || 'لا يوجد وصف متاح';
-            document.getElementById('desc-modal').classList.remove('hidden');
-        }
-    }
-
-    function shareContent() {
-        if (navigator.share && auctionData) {
-            navigator.share({ title: auctionData.title, text: `شارك في مزاد ${auctionData.title}`, url: location.href });
-        } else if(auctionData) {
-            navigator.clipboard?.writeText(location.href).then(() => alert('تم نسخ الرابط!'));
-        }
-    }
-
-    function openNotifications() {
-        document.getElementById('notif-badge').classList.add('hidden');
-        updateNotifListModal();
-        document.getElementById('notif-modal').classList.remove('hidden');
-    }
-
-    async function updateNotifListModal() {
-        const container = document.getElementById('notif-list');
-        try {
-            const res = await fetch('latest_notif.json?' + new Date().getTime(), { cache: 'no-store' });
-            if(res.ok) {
-                const notif = await res.json();
-                if(notif && notif.title) {
-                    container.innerHTML = `<div class="flex gap-3 p-3 bg-blue-50 rounded-xl border border-blue-100">
-                        <div class="w-10 h-10 bg-blue-100 rounded-lg flex items-center justify-center text-blue-600 shrink-0"><span class="material-symbols-outlined">campaign</span></div>
-                        <div><h4 class="font-bold text-sm text-gray-800">${notif.title}</h4><p class="text-xs text-gray-500 mt-1">${notif.msg}</p></div></div>`;
-                } else {
-                    container.innerHTML = '<div class="text-center text-gray-400 py-8">لا توجد تنبيهات</div>';
+        // نظام التحديث الفائق السرعة 1ms
+        S.timers.clock = setInterval(() => {
+            if(S.auction && S.auction.end_time) {
+                const diff = S.auction.end_time - Math.floor(Date.now()/1000);
+                const exp = diff <= 0;
+                const ts = exp ? 'انتهى المزاد' : `${String(Math.floor(diff/3600)).padStart(2,'0')}:${String(Math.floor((diff%3600)/60)).padStart(2,'0')}:${String(diff%60).padStart(2,'0')}`;
+                
+                updateDOMElement('h-timer', ts, 'hTimer');
+                updateDOMElement('b-timer', ts, 'bTimer');
+                
+                if(exp) {
+                    const ht = el('#h-timer');
+                    if(ht && !ht.classList.contains('text-red-500')) ht.classList.add('text-red-500');
+                    const bt = el('#b-timer');
+                    if(bt && !bt.classList.contains('text-red-500')) bt.classList.add('text-red-500');
                 }
             }
-        } catch(e) {}
+            S.frameCount++;
+        }, SYNC_INTERVAL);
+        
+        // جلب البيانات كل 1ms
+        S.timers.dataSync = setInterval(() => fastDataSync(), SYNC_INTERVAL);
+        
+        document.addEventListener('click',e=>{
+            if(!e.target.closest('#account-menu')&&!e.target.closest('[onclick*="toggleAccount"]')){
+                el('#account-menu')?.classList.add('hidden');
+            }
+            if(!e.target.closest('#notif-panel')&&!e.target.closest('[onclick*="toggleNotif"]')){
+                el('#notif-panel')?.classList.add('hidden');
+            }
+        });
+        
+        let tsx=0;
+        document.addEventListener('touchstart',e=>{
+            if(!el('#lightbox-full')?.classList.contains('hidden'))
+                tsx=e.touches[0].clientX;
+        },{passive:true});
+        
+        document.addEventListener('touchend',e=>{
+            if(!el('#lightbox-full')?.classList.contains('hidden')){
+                const d=tsx-e.changedTouches[0].clientX;
+                if(Math.abs(d)>40)lbNav(d>0?1:-1);
+            }
+        });
+        
+        document.addEventListener('keydown',e=>{
+            if(!el('#lightbox-full')?.classList.contains('hidden')){
+                if(e.key==='ArrowRight')lbNav(1);
+                if(e.key==='ArrowLeft')lbNav(-1);
+                if(e.key==='Escape')closeLB();
+            }
+        });
     }
 
-    function openModal(id) { document.getElementById(id).classList.remove('hidden'); }
-    function closeModal(id) { document.getElementById(id).classList.add('hidden'); }
-    function closeAccountModal() { document.getElementById('account-modal').classList.add('hidden'); }
+    if(document.readyState==='loading')document.addEventListener('DOMContentLoaded',init);else init();
+    window.Mazad={
+        goHome,enterBid,toggleAccount,forceRefresh,setInc,showConfirm,submitBid,
+        refresh:fastDataSync,openLB,closeLB,lbNav,openDesc,share,
+        toggleNotif,closeNotif,openModal,closeModal,dismissNotifPopup
+    };
+})();
 </script>
 </body>
 </html>
